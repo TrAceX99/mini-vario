@@ -6,12 +6,21 @@
 
 #include <stdio.h>
 #include <inttypes.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "nvs_flash.h"
+/* BLE */
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
+#include "host/ble_hs.h"
+#include "host/util/util.h"
+#include "console/console.h"
+#include "services/gap/ble_svc_gap.h"
 
 #include "bmp3.h"
 
@@ -128,6 +137,31 @@ BMP3_INTF_RET_TYPE bmp3_interface_init(struct bmp3_dev *bmp3)
     return rslt;
 }
 
+static uint8_t calculate_LK8EX1_checksum(const char *szNMEA)
+{
+    const char *sz = &szNMEA[1]; // skip leading '$'
+    uint8_t cksum = 0;
+    while ((*sz) != 0 && (*sz != '*'))
+    {
+        cksum ^= (uint8_t)*sz;
+        sz++;
+    }
+    return cksum;
+}
+
+static void format_LK8EX1_string(char *buf, uint64_t pressure, int64_t temp, float battery_v)
+{
+    uint32_t final_pressure = (pressure + 50) / 100;
+    int32_t final_temp = (temp + 50) / 100;
+    sprintf(buf, "$LK8EX1,%lu,99999,9999,%ld,%.1f,*", final_pressure, final_temp, battery_v);
+    uint8_t cksum = calculate_LK8EX1_checksum(buf);
+    char chksum[5];
+    sprintf(chksum, "%02X\r\n", cksum);
+    strcat(buf, chksum);
+}
+
+
+
 int8_t rslt;
 uint16_t settings_sel;
 struct bmp3_dev dev;
@@ -163,7 +197,6 @@ void app_main(void)
     rslt = bmp3_init(&dev);
     bmp3_check_rslt("bmp3_init", rslt);
 
-    settings.int_settings.drdy_en = BMP3_ENABLE;
     settings.press_en = BMP3_ENABLE;
     settings.temp_en = BMP3_ENABLE;
 
@@ -172,7 +205,7 @@ void app_main(void)
     settings.odr_filter.odr = BMP3_ODR_50_HZ;
     settings.odr_filter.iir_filter = BMP3_IIR_FILTER_COEFF_7;
 
-    settings_sel = BMP3_SEL_PRESS_EN | BMP3_SEL_TEMP_EN | BMP3_SEL_PRESS_OS | BMP3_SEL_TEMP_OS | BMP3_SEL_ODR | BMP3_SEL_IIR_FILTER | BMP3_SEL_DRDY_EN;
+    settings_sel = BMP3_SEL_PRESS_EN | BMP3_SEL_TEMP_EN | BMP3_SEL_PRESS_OS | BMP3_SEL_TEMP_OS | BMP3_SEL_ODR | BMP3_SEL_IIR_FILTER;
 
     rslt = bmp3_set_sensor_settings(settings_sel, &settings, &dev);
     bmp3_check_rslt("bmp3_set_sensor_settings", rslt);
@@ -181,23 +214,37 @@ void app_main(void)
     rslt = bmp3_set_op_mode(&settings, &dev);
     bmp3_check_rslt("bmp3_set_op_mode", rslt);
 
+    /* Initialize NVS — it is used to store PHY calibration data */
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    ret = nimble_port_init();
+    if (ret != ESP_OK) {
+        MODLOG_DFLT(ERROR, "Failed to init nimble %d \n", ret);
+        return;
+    }
+    ble_svc_gap_device_name_set("MiniVario");
+
     while (1)
     {
         rslt = bmp3_get_status(&status, &dev);
         bmp3_check_rslt("bmp3_get_status", rslt);
 
         /* Read temperature and pressure data iteratively based on data ready interrupt */
-        if ((rslt == BMP3_OK) && (status.intr.drdy == BMP3_ENABLE))
+        if (rslt == BMP3_OK)
         {
             rslt = bmp3_get_sensor_data(BMP3_PRESS_TEMP, &data, &dev);
             bmp3_check_rslt("bmp3_get_sensor_data", rslt);
 
-            /* NOTE : Read status register again to clear data ready interrupt status */
-            rslt = bmp3_get_status(&status, &dev);
-            bmp3_check_rslt("bmp3_get_status", rslt);
-
-            printf("T: %.2f deg C, P: %.2f Pa\n", data.temperature, data.pressure);
+            char msg[40];
+            format_LK8EX1_string(msg, data.pressure, data.temperature, 0.0);
+            // sprintf(msg, "%llu", data.pressure);
+            printf("%s", msg);
         }
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
