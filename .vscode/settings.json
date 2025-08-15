@@ -14,6 +14,10 @@
     "esp_system.h": "c",
     "sdkconfig.h": "c",
     "task.h": "c",
-    "freertos.h": "c"
-  }
+    "freertos.h": "c",
+    "esp_chip_info.h": "c",
+    "bmp3_defs.h": "c",
+    "i2c_master.h": "c"
+  },
+  "idf.flashType": "UART"
 }
