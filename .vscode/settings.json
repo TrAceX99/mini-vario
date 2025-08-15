@@ -1,0 +1,19 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPathWin": "d:\\esp\\v5.4\\esp-idf",
+  "idf.pythonInstallPath": "d:\\esp\\tools\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.openOcdConfigs": [
+    "board/esp32c3-builtin.cfg"
+  ],
+  "idf.portWin": "COM3",
+  "idf.toolsPathWin": "d:\\esp\\tools",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c3"
+  },
+  "files.associations": {
+    "esp_system.h": "c",
+    "sdkconfig.h": "c",
+    "task.h": "c",
+    "freertos.h": "c"
+  }
+}
