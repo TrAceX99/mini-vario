@@ -13,6 +13,7 @@
 
 #include "bt.h"
 #include "baro.h"
+#include "vario.h"
 
 #define TAG "APP"
 
@@ -28,9 +29,10 @@ static uint8_t nmea_checksum(const char *nmea_str)
     return cksum;
 }
 
-static void format_LK8EX1_string(char *buf, double pressure, double temp, float battery_v)
+static void format_LK8EX1_string(char *buf, double pressure, double temp, float battery)
 {
-    sprintf(buf, "$LK8EX1,%.2f,99999,9999,%.1f,%.1f,*", pressure, temp, battery_v);
+    battery = battery * 100.0f + 1000.0f;
+    sprintf(buf, "$LK8EX1,%.2f,99999,9999,%.1f,%.0f,*", pressure, temp, battery);
     uint8_t cksum = nmea_checksum(buf);
     char chksum[5];
     sprintf(chksum, "%02X\r\n", cksum);
@@ -41,22 +43,23 @@ void app_main(void)
 {
     bt_init();
     baro_init();
+    vario_init();
 
-    while (1)
-    {
-        double pressure = 0.0;
-        double temperature = 0.0;
-
-        baro_read(&pressure, &temperature);
-
-        char msg[40];
-        format_LK8EX1_string(msg, pressure, temperature, 3.7);
-        // sprintf(msg, "%llu", data.pressure);
-        printf("%s", msg);
-        if (bt_is_connected()) {
-            bt_nus_send(msg, strlen(msg));
+    vario_data_t data;
+    const TickType_t period = pdMS_TO_TICKS(200);
+    TickType_t last = xTaskGetTickCount();
+    while (1) {
+        BaseType_t delayed = xTaskDelayUntil(&last, period);
+        if (unlikely(delayed != pdTRUE)) {
+            ESP_LOGW(TAG, "Task delayed");
         }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
+        if (vario_get(&data)) {
+            char msg[48];
+            format_LK8EX1_string(msg, data.pressure_pa, data.temperature_c, 0.5f);
+            printf("%s", msg);
+            if (bt_is_connected()) {
+                bt_nus_send(msg, strlen(msg));
+            }
+        }
     }
 }

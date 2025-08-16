@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "baro.c"
         "bt.c"
+        "vario.c"
         "main.c"
     PRIV_REQUIRES
         bmp3
