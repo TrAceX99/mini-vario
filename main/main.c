@@ -10,12 +10,17 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 
 #include "bt.h"
 #include "baro.h"
 #include "vario.h"
 
 #define TAG "APP"
+
+bool conf_enable_uart = true;
+bool conf_enable_audio = true;
+bool conf_enable_bluetooth = true;
 
 static uint8_t nmea_checksum(const char *nmea_str)
 {
@@ -41,9 +46,18 @@ static void format_LK8EX1_string(char *buf, double pressure, double temp, float 
 
 void app_main(void)
 {
-    bt_init();
+    if (conf_enable_bluetooth) {
+        bt_init();
+    }
     baro_init();
     vario_init();
+
+    esp_pm_config_t pm_config = {
+        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz = CONFIG_XTAL_FREQ,
+        .light_sleep_enable = false,
+    };
+    esp_pm_configure(&pm_config);
 
     vario_data_t data;
     const TickType_t period = pdMS_TO_TICKS(200);
@@ -56,9 +70,13 @@ void app_main(void)
         if (vario_get(&data)) {
             char msg[48];
             format_LK8EX1_string(msg, data.pressure_pa, data.temperature_c, 0.5f);
-            printf("%s", msg);
             if (bt_is_connected()) {
                 bt_nus_send(msg, strlen(msg));
+            }
+            if (conf_enable_uart) {
+                printf("%s", msg);
+                esp_pm_dump_locks(stdout);
+                fflush(stdout);
             }
         }
     }

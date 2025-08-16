@@ -8,6 +8,7 @@ idf_component_register(
         bmp3
         bt
         nvs_flash
+        esp_pm
     REQUIRES
         driver
     INCLUDE_DIRS

@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "driver/ledc.h"
 #include "baro.h"
+#include "bt.h"
 
 // Configuration
 #define VARIO_TASK_NAME            "vario"
@@ -40,6 +41,8 @@
 #define VARIO_LEDC_MODE          LEDC_LOW_SPEED_MODE
 #define VARIO_LEDC_CHANNEL       LEDC_CHANNEL_0
 #define VARIO_LEDC_DUTY_RES      LEDC_TIMER_10_BIT
+
+extern bool conf_enable_audio;
 
 static const char *TAG = "VARIO";
 
@@ -80,6 +83,12 @@ static void buzzer_set(float freq_hz, float duty)
 
 static void update_audio(float vs)
 {
+    if (!conf_enable_audio || !bt_is_connected())
+    {
+        buzzer_set(0, 0);
+        return;
+    }
+
     if (vs >= VARIO_MIN_CLIMB_TONE) {
         float climb = vs;
         if (climb > VARIO_MAX_CLIMB_TONE) climb = VARIO_MAX_CLIMB_TONE;
