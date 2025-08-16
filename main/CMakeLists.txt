@@ -1,4 +1,14 @@
-idf_component_register(SRCS "main.c"
-                    PRIV_REQUIRES bmp3 bt nvs_flash
-                    REQUIRES driver
-                    INCLUDE_DIRS "")
+idf_component_register(
+    SRCS
+        "baro.c"
+        "bt.c"
+        "main.c"
+    PRIV_REQUIRES
+        bmp3
+        bt
+        nvs_flash
+    REQUIRES
+        driver
+    INCLUDE_DIRS
+        "include"
+)

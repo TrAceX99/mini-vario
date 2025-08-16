@@ -100,8 +100,6 @@ extern "C" {
 /********************************************************/
 /**\name Compiler switch macros */
 
-#define BMP3_64BIT_COMPENSATION
-
 #ifndef BMP3_64BIT_COMPENSATION /*< Check if 64bit (using BMP3_64BIT_COMPENSATION) is enabled */
 #ifndef BMP3_FLOAT_COMPENSATION /*< If 64 bit integer data type is not enabled then enable
                                             * BMP3_FLOAT_COMPENSATION */
