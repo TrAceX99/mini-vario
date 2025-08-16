@@ -1,19 +1,28 @@
 #include "bt.h"
+
 #include <string.h>
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "host/ble_hs.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
+#include "host/ble_hs.h"
+#include "host/ble_gap.h"
+#include "host/ble_gatt.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
 #define TAG "BT"
 
-/* Nordic UART Service UUIDs (128-bit) */
-static const ble_uuid128_t nus_svc_uuid = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x00, 0x40, 0x6e, 0xc0);
-static const ble_uuid128_t nus_rx_uuid = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x40, 0x6e, 0xc0);
-static const ble_uuid128_t nus_tx_uuid = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x40, 0x6e, 0xc0);
+/* Nordic UART Service UUIDs (128-bit)
+ * Canonical (big-endian):
+ *   Service: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
+ *   RX Char: 6E400002-B5A3-F393-E0A9-E50E24DCCA9E
+ *   TX Char: 6E400003-B5A3-F393-E0A9-E50E24DCCA9E
+ * NimBLE stores uuid128 value[] little-endian (LSB first), so bytes are reversed below.
+ */
+static const ble_uuid128_t nus_svc_uuid = BLE_UUID128_INIT(0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E);
+static const ble_uuid128_t nus_rx_uuid  = BLE_UUID128_INIT(0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x02, 0x00, 0x40, 0x6E);
+static const ble_uuid128_t nus_tx_uuid  = BLE_UUID128_INIT(0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0, 0x93, 0xF3, 0xA3, 0xB5, 0x03, 0x00, 0x40, 0x6E);
 
 static const char device_name[] = "MiniVario";
 
@@ -23,6 +32,9 @@ static uint8_t addr_val[6] = {0};
 static uint16_t nus_conn_handle = 0;
 static uint16_t nus_tx_val_handle = 0;
 static uint16_t nus_rx_val_handle = 0;
+
+static int ble_gap_event_cb(struct ble_gap_event *event, void *arg);
+static int gatts_nus_access_cb(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg);
 
 static const struct ble_gatt_svc_def gatt_svcs[] = {
     {
@@ -45,8 +57,6 @@ static const struct ble_gatt_svc_def gatt_svcs[] = {
     },
     {0},
 };
-
-static int ble_gap_event_cb(struct ble_gap_event *event, void *arg);
 
 static void start_advertising(void)
 {
@@ -103,20 +113,23 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "Connected; conn_handle=%d", nus_conn_handle);
             // print connection descriptor
             struct ble_gap_conn_desc desc;
-            char addr_str[18] = {0};
 
             ble_gap_conn_find(nus_conn_handle, &desc);
             ESP_LOGI(TAG, "connection handle: %d", desc.conn_handle);
 
             /* Local ID address */
-            format_addr(addr_str, desc.our_id_addr.val);
-            ESP_LOGI(TAG, "device id address: type=%d, value=%s",
-                     desc.our_id_addr.type, addr_str);
+            ESP_LOGI(TAG, "device id address: type=%d, %02X:%02X:%02X:%02X:%02X:%02X",
+                     desc.our_id_addr.type,
+                     desc.our_id_addr.val[5], desc.our_id_addr.val[4],
+                     desc.our_id_addr.val[3], desc.our_id_addr.val[2],
+                     desc.our_id_addr.val[1], desc.our_id_addr.val[0]);
 
             /* Peer ID address */
-            format_addr(addr_str, desc.peer_id_addr.val);
-            ESP_LOGI(TAG, "peer id address: type=%d, value=%s", desc.peer_id_addr.type,
-                     addr_str);
+            ESP_LOGI(TAG, "peer id address: type=%d, %02X:%02X:%02X:%02X:%02X:%02X",
+                     desc.peer_id_addr.type,
+                     desc.peer_id_addr.val[5], desc.peer_id_addr.val[4],
+                     desc.peer_id_addr.val[3], desc.peer_id_addr.val[2],
+                     desc.peer_id_addr.val[1], desc.peer_id_addr.val[0]);
 
             /* Connection info */
             ESP_LOGI(TAG,
@@ -176,18 +189,10 @@ static void ble_stack_on_sync(void)
 {
     /* Local variables */
     int rc = 0;
-    char addr_str[18] = {0};
 
-    /* Make sure we have proper BT identity address set (public preferred) */
-    rc = ble_hs_util_ensure_addr(0);
-    if (rc != 0)
-    {
-        ESP_LOGE(TAG, "device does not have any available bt address!");
-        return;
-    }
-
-    /* Figure out BT address to use while advertising (no privacy) */
-    rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    /* Figure out BT address to use while advertising */
+    // rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    own_addr_type = BLE_OWN_ADDR_PUBLIC;
     if (rc != 0)
     {
         ESP_LOGE(TAG, "failed to infer address type, error code: %d", rc);

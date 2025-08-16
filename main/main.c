@@ -30,7 +30,7 @@ static uint8_t nmea_checksum(const char *nmea_str)
 
 static void format_LK8EX1_string(char *buf, double pressure, double temp, float battery_v)
 {
-    sprintf(buf, "$LK8EX1,%.0f,99999,9999,%.1f,%.1f,*", pressure, temp, battery_v);
+    sprintf(buf, "$LK8EX1,%.2f,99999,9999,%.1f,%.1f,*", pressure, temp, battery_v);
     uint8_t cksum = nmea_checksum(buf);
     char chksum[5];
     sprintf(chksum, "%02X\r\n", cksum);
@@ -40,6 +40,8 @@ static void format_LK8EX1_string(char *buf, double pressure, double temp, float 
 void app_main(void)
 {
     bt_init();
+    baro_init();
+
     while (1)
     {
         double pressure = 0.0;

@@ -28,14 +28,15 @@ static void bmp3_user_delay_us(uint32_t period, void *intf_ptr)
 static BMP3_INTF_RET_TYPE bmp3_user_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr)
 {
     esp_err_t ret;
+    i2c_master_dev_handle_t dev_handle = (i2c_master_dev_handle_t)intf_ptr;
 
-    ret = i2c_master_transmit_receive(intf_ptr, &reg_addr, 1, reg_data, len, 100);
+    ret = i2c_master_transmit_receive(dev_handle, &reg_addr, 1, reg_data, len, 100);
     if (ret != ESP_OK)
     {
-        return -1;
+        return -1; // BMP3_E_COM_FAIL alternative
     }
 
-    return 0;
+    return 0; // BMP3_OK
 }
 
 /*!
@@ -44,6 +45,7 @@ static BMP3_INTF_RET_TYPE bmp3_user_i2c_read(uint8_t reg_addr, uint8_t *reg_data
 static BMP3_INTF_RET_TYPE bmp3_user_i2c_write(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr)
 {
     esp_err_t ret;
+    i2c_master_dev_handle_t dev_handle = (i2c_master_dev_handle_t)intf_ptr;
     i2c_master_transmit_multi_buffer_info_t buffer_info[2] = {
         {
             .write_buffer = &reg_addr,
@@ -55,13 +57,13 @@ static BMP3_INTF_RET_TYPE bmp3_user_i2c_write(uint8_t reg_addr, uint8_t *reg_dat
         },
     };
 
-    ret = i2c_master_multi_buffer_transmit(intf_ptr, buffer_info, 2, 100);
+    ret = i2c_master_multi_buffer_transmit(dev_handle, buffer_info, 2, 100);
     if (ret != ESP_OK)
     {
-        return -1;
+        return -1; // BMP3_E_COM_FAIL alternative
     }
 
-    return 0;
+    return 0; // BMP3_OK
 }
 
 static void baro_i2c_init(void)
@@ -88,11 +90,13 @@ void baro_init(void)
 {
     int8_t res;
 
+    baro_i2c_init();
+
     dev.intf = BMP3_I2C_INTF;
     dev.read = bmp3_user_i2c_read;
     dev.write = bmp3_user_i2c_write;
     dev.delay_us = bmp3_user_delay_us;
-    dev.intf_ptr = i2c_bus;
+    dev.intf_ptr = i2c_dev;
 
     res = bmp3_init(&dev);
     if (unlikely(res != BMP3_OK))
@@ -108,7 +112,7 @@ void baro_init(void)
     settings.odr_filter.press_os = BMP3_OVERSAMPLING_8X;
     settings.odr_filter.temp_os = BMP3_NO_OVERSAMPLING;
     settings.odr_filter.odr = BMP3_ODR_50_HZ;
-    settings.odr_filter.iir_filter = BMP3_IIR_FILTER_COEFF_7;
+    settings.odr_filter.iir_filter = BMP3_IIR_FILTER_COEFF_3;
 
     uint32_t settings_sel = BMP3_SEL_PRESS_EN | BMP3_SEL_TEMP_EN | BMP3_SEL_PRESS_OS | BMP3_SEL_TEMP_OS | BMP3_SEL_ODR | BMP3_SEL_IIR_FILTER;
     res = bmp3_set_sensor_settings(settings_sel, &settings, &dev);
