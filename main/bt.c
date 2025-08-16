@@ -167,8 +167,8 @@ static int gatts_nus_access_cb(uint16_t conn_handle, uint16_t attr_handle, struc
     (void)arg;
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && attr_handle == nus_rx_val_handle) {
         uint8_t buf[128];
-        int copied = ble_hs_mbuf_to_flat(ctxt->om, buf, sizeof(buf)-1, NULL);
-        if (copied < 0) return BLE_ATT_ERR_UNLIKELY;
+        uint16_t copied = 0;
+        ble_hs_mbuf_to_flat(ctxt->om, buf, sizeof(buf)-1, &copied);
         buf[copied] = '\0';
         ESP_LOGI(TAG, "RX CMD: %s", buf);
         char resp[64] = {0};

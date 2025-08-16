@@ -15,7 +15,7 @@
 
 // Configuration
 #define VARIO_TASK_NAME            "vario"
-#define VARIO_TASK_STACK           2048
+#define VARIO_TASK_STACK           4096
 #define VARIO_TASK_PRIO            4
 #define VARIO_SAMPLE_PERIOD_MS     50            // 20 Hz nominal loop
 #define VARIO_MIN_CLIMB_TONE       0.30f         // m/s start climb beeps
@@ -78,6 +78,7 @@ static void buzzer_set(float freq_hz, float duty)
     uint32_t duty_val = (uint32_t)(duty * max_duty);
     ledc_set_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL, duty_val);
     ledc_update_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL);
+    printf("Buzzer: freq=%.1fHz, duty=%.2f\n", freq_hz, duty);
 }
 
 static void update_audio(float vs)

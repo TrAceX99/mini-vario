@@ -31,10 +31,10 @@ static uint8_t nmea_checksum(const char *nmea_str)
     return cksum;
 }
 
-static void format_LK8EX1_string(char *buf, double pressure, double temp, float battery)
+static void format_LK8EX1_string(char *buf, double pressure, float climb, double temp, float battery)
 {
     battery = battery * 100.0f + 1000.0f;
-    sprintf(buf, "$LK8EX1,%.2f,99999,9999,%.1f,%.0f,*", pressure, temp, battery);
+    sprintf(buf, "$LK8EX1,%.2f,99999,%.0f,%.1f,%.0f,*", pressure, climb * 100, temp, battery);
     uint8_t cksum = nmea_checksum(buf);
     char chksum[5];
     sprintf(chksum, "%02X\r\n", cksum);
@@ -66,14 +66,14 @@ void app_main(void)
         }
         if (vario_get(&data)) {
             char msg[48];
-            format_LK8EX1_string(msg, data.pressure_pa, data.temperature_c, 0.5f);
+            format_LK8EX1_string(msg, data.pressure_pa, data.vspeed_mps, data.temperature_c, 0.5f);
             if (bt_is_connected()) {
                 bt_nus_send(msg, strlen(msg));
             }
             if (conf_enable_uart) {
                 printf("%s", msg);
-                esp_pm_dump_locks(stdout);
-                fflush(stdout);
+                // esp_pm_dump_locks(stdout);
+                // fflush(stdout);
             }
         }
     }
