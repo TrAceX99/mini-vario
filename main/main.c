@@ -15,12 +15,9 @@
 #include "bt.h"
 #include "baro.h"
 #include "vario.h"
+#include "config.h"
 
 #define TAG "APP"
-
-bool conf_enable_uart = true;
-bool conf_enable_audio = true;
-bool conf_enable_bluetooth = true;
 
 static uint8_t nmea_checksum(const char *nmea_str)
 {

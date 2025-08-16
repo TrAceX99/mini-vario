@@ -11,6 +11,7 @@
 #include "driver/ledc.h"
 #include "baro.h"
 #include "bt.h"
+#include "config.h"
 
 // Configuration
 #define VARIO_TASK_NAME            "vario"
@@ -41,8 +42,6 @@
 #define VARIO_LEDC_MODE          LEDC_LOW_SPEED_MODE
 #define VARIO_LEDC_CHANNEL       LEDC_CHANNEL_0
 #define VARIO_LEDC_DUTY_RES      LEDC_TIMER_10_BIT
-
-extern bool conf_enable_audio;
 
 static const char *TAG = "VARIO";
 

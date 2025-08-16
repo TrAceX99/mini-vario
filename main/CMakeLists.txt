@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "baro.c"
         "bt.c"
+        "config.c"
         "vario.c"
         "main.c"
     PRIV_REQUIRES

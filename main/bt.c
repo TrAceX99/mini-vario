@@ -1,4 +1,5 @@
 #include "bt.h"
+#include "config.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -164,21 +165,20 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
 static int gatts_nus_access_cb(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     (void)arg;
-    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && attr_handle == nus_rx_val_handle)
-    {
-        /* Data received from central (RX characteristic) */
-        struct os_mbuf *om = ctxt->om;
-        uint8_t buf[256];
-        int off = 0;
-        while (om)
-        {
-            int copy = OS_MBUF_PKTLEN(om) - off;
-            if (copy > (int)sizeof(buf))
-                copy = sizeof(buf);
-            ble_hs_mbuf_to_flat(om, buf, copy, NULL);
-            // For now just log received data
-            ESP_LOGI(TAG, "RX: %.*s", copy, buf);
-            om = SLIST_NEXT(om, om_next);
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && attr_handle == nus_rx_val_handle) {
+        uint8_t buf[128];
+        int copied = ble_hs_mbuf_to_flat(ctxt->om, buf, sizeof(buf)-1, NULL);
+        if (copied < 0) return BLE_ATT_ERR_UNLIKELY;
+        buf[copied] = '\0';
+        ESP_LOGI(TAG, "RX CMD: %s", buf);
+        char resp[64] = {0};
+        if (config_apply_command((const char*)buf, resp, sizeof(resp))) {
+            if (resp[0]) {
+                bt_nus_send(resp, (uint16_t)strlen(resp));
+            }
+        } else {
+            const char *err = "ERR\n";
+            bt_nus_send(err, (uint16_t)strlen(err));
         }
         return 0;
     }
