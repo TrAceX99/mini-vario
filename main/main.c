@@ -10,9 +10,8 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_log.h"
-/* BLE */
-#include "bt.h"
 
+#include "bt.h"
 #include "baro.h"
 
 #define TAG "APP"
@@ -49,7 +48,7 @@ void app_main(void)
         baro_read(&pressure, &temperature);
 
         char msg[40];
-        format_LK8EX1_string(msg, pressure, temperature, 0.0);
+        format_LK8EX1_string(msg, pressure, temperature, 3.7);
         // sprintf(msg, "%llu", data.pressure);
         printf("%s", msg);
         if (bt_is_connected()) {
