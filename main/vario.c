@@ -105,11 +105,15 @@ static void buzzer_set(float freq_hz, float duty)
     // Active buzzer: ignore frequency and duty specifics; treat any non-zero request as ON
     if (freq_hz <= 0.0f || duty <= 0.0f)
     {
+        gpio_hold_dis(VARIO_BUZZER_GPIO);
         gpio_set_level(VARIO_BUZZER_GPIO, 0);
+        gpio_hold_en(VARIO_BUZZER_GPIO);
     }
     else
     {
+        gpio_hold_dis(VARIO_BUZZER_GPIO);
         gpio_set_level(VARIO_BUZZER_GPIO, 1);
+        gpio_hold_en(VARIO_BUZZER_GPIO);
     }
 }
 #endif
@@ -417,6 +421,7 @@ void vario_init(void)
     };
     gpio_config(&io);
     gpio_set_level(VARIO_BUZZER_GPIO, 0);
+    gpio_hold_en(VARIO_BUZZER_GPIO);
 #endif
 
     // Create (or reuse) timers for unified scheduling
