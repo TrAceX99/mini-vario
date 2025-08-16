@@ -65,6 +65,9 @@ void app_main(void)
             ESP_LOGW(TAG, "Task delayed");
         }
         if (vario_get(&data)) {
+            if (!conf_send_vario) {
+                data.vspeed_mps = 99.99f;
+            }
             char msg[48];
             format_LK8EX1_string(msg, data.pressure_pa, data.vspeed_mps, data.temperature_c, 0.5f);
             if (bt_is_connected()) {
