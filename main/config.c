@@ -6,6 +6,12 @@
 #include <stdio.h>
 #include <ctype.h>
 #include "esp_pm.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "battery.h"
 
 volatile bool conf_enable_uart = true;
 volatile bool conf_enable_audio = true;
@@ -82,6 +88,65 @@ bool config_apply_command(const char *cmd_in, char *out_resp, int resp_size)
     {
         if (out_resp)
             config_format_status(out_resp, resp_size);
+        return true;
+    }
+    if (strcmp(local, "DEBUG") == 0)
+    {
+        uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+        size_t free_heap = esp_get_free_heap_size();
+        size_t min_free_heap = esp_get_minimum_free_heap_size();
+        size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+        printf("DBG UPTIME=%lus\nHEAP(free=%u min=%u largest=%u)\n", uptime_s, (unsigned)free_heap, (unsigned)min_free_heap, (unsigned)largest_block);
+
+        // Enable light sleep during dump, workaround in order to print sleep stats
+        esp_pm_config_t pm_config = {
+            .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+            .min_freq_mhz = CONFIG_XTAL_FREQ,
+            .light_sleep_enable = true,
+        };
+        esp_pm_configure(&pm_config);
+        esp_pm_dump_locks(stdout);
+        pm_config.light_sleep_enable = false;
+        esp_pm_configure(&pm_config);
+
+        // Task stack high water marks (truncated list)
+        #if (configUSE_TRACE_FACILITY == 1)
+        {
+            #ifndef MAX_DBG_TASKS
+            #define MAX_DBG_TASKS 16
+            #endif
+            TaskStatus_t taskStatusArray[MAX_DBG_TASKS];
+            UBaseType_t total = uxTaskGetSystemState(taskStatusArray, MAX_DBG_TASKS, NULL);
+            printf("TASKS total=%u (showing up to %u)\n", (unsigned)uxTaskGetNumberOfTasks(), (unsigned)total);
+            for (UBaseType_t i = 0; i < total; ++i)
+            {
+                // High water mark is in words (stack depth units); convert to bytes
+                unsigned hw = (unsigned)taskStatusArray[i].usStackHighWaterMark * sizeof(StackType_t);
+                char state = 'U';
+                if (taskStatusArray[i].eCurrentState == eSuspended)
+                    state = 'S';
+                if (taskStatusArray[i].eCurrentState == eBlocked)
+                    state = 'B';
+                if (taskStatusArray[i].eCurrentState == eReady)
+                    state = 'R';
+                if (taskStatusArray[i].eCurrentState == eDeleted)
+                    state = 'D';
+                if (taskStatusArray[i].eCurrentState == eRunning)
+                    state = 'A';
+                printf(" T=%s hw=%uB pri=%u s=%c\n", taskStatusArray[i].pcTaskName, hw, (unsigned)taskStatusArray[i].uxCurrentPriority, state);
+            }
+            if (uxTaskGetNumberOfTasks() > total)
+                printf(" ...truncated\n");
+        }
+        #else
+            printf("TASK STATS DISABLED (configUSE_TRACE_FACILITY=0)\n");
+        #endif
+
+        // Current configuration snapshot
+        printf("CFG UART=%d AUDIO=%d BLE=%d VARIO=%d\n", conf_enable_uart?1:0, conf_enable_audio?1:0, conf_enable_bluetooth?1:0, conf_send_vario?1:0);
+
+        printf("BATTERY %.0f%% voltage=%.3fV\n", battery_get() * 100.0f, battery_get_voltage());
+
         return true;
     }
     int v = -1;

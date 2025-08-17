@@ -13,9 +13,9 @@
 #include "esp_adc/adc_cali_scheme.h"
 
 #define BATTERY_TASK_NAME "battery"
-#define BATTERY_TASK_STACK 2048
+#define BATTERY_TASK_STACK 4096
 #define BATTERY_TASK_PRIO 3
-#define BATTERY_SAMPLE_PERIOD_MS 1000
+#define BATTERY_SAMPLE_PERIOD_MS 2000
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_4 /* GPIO4 on ESP32-C3 -> ADC1_CH4 */
 #define BATTERY_ADC_ATTEN ADC_ATTEN_DB_12 /* ~2.4V full-scale typical */
 
@@ -45,7 +45,7 @@ static bool s_cali_enabled = false;
 #define BATTERY_VOLTAGE_MIN 3.3f
 #endif
 #ifndef BATTERY_VOLTAGE_MAX
-#define BATTERY_VOLTAGE_MAX 4.2f
+#define BATTERY_VOLTAGE_MAX 4.18f
 #endif
 
 static float map_voltage_to_percent(float v)
