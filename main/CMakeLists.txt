@@ -3,6 +3,7 @@ idf_component_register(
         "baro.c"
         "bt.c"
         "config.c"
+        "battery.c"
         "vario.c"
         "main.c"
     PRIV_REQUIRES
@@ -10,6 +11,7 @@ idf_component_register(
         bt
         nvs_flash
         esp_pm
+        esp_adc
     REQUIRES
         driver
     INCLUDE_DIRS

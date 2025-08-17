@@ -16,6 +16,7 @@
 #include "baro.h"
 #include "vario.h"
 #include "config.h"
+#include "battery.h"
 
 #define TAG "APP"
 
@@ -48,6 +49,7 @@ void app_main(void)
     }
     baro_init();
     vario_init();
+    battery_init();
 
     esp_pm_config_t pm_config = {
         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
@@ -69,7 +71,7 @@ void app_main(void)
                 data.vspeed_mps = 99.99f;
             }
             char msg[48];
-            format_LK8EX1_string(msg, data.pressure_pa, data.vspeed_mps, data.temperature_c, 0.5f);
+            format_LK8EX1_string(msg, data.pressure_pa, data.vspeed_mps, data.temperature_c, battery_get());
             if (bt_is_connected()) {
                 bt_nus_send(msg, strlen(msg));
             }
