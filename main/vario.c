@@ -26,8 +26,8 @@
 #define VARIO_TASK_STACK 4096
 #define VARIO_TASK_PRIO 4
 #define VARIO_SAMPLE_PERIOD_MS 50  // 20 Hz nominal loop
-#define VARIO_MIN_CLIMB_TONE 0.30f // m/s start climb beeps
-#define VARIO_MAX_CLIMB_TONE 3.00f
+#define VARIO_MIN_CLIMB_TONE 0.20f // m/s start climb beeps
+#define VARIO_MAX_CLIMB_TONE 5.00f
 #define VARIO_SINK_ALARM 2.00f // continuous sink tone threshold
 #define VARIO_SINK_EXCESS_MAX 5.0f
 
@@ -61,9 +61,10 @@
 #define VARIO_CLIMB_FREQ_MIN 1000.0f
 #define VARIO_CLIMB_FREQ_MAX 3000.0f
 #define VARIO_CLIMB_BUZZER_DUTY 0.5f
-#define VARIO_SINK_FREQ_MAX 450.0f
-#define VARIO_SINK_FREQ_MIN 275.0f
+#define VARIO_SINK_FREQ_MAX 400.0f
+#define VARIO_SINK_FREQ_MIN 200.0f
 #define VARIO_SINK_BUZZER_DUTY 0.5f
+#define VARIO_BUZZER_RESONANT_FREQ 2100.0f
 
 static const char *TAG = "VARIO";
 
@@ -100,8 +101,8 @@ static void buzzer_set(float freq_hz, float duty)
         ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_B, 1);
         return;
     }
-    if (freq_hz > 4000.0f)
-        freq_hz = 4000.0f;
+    if (freq_hz > 5000.0f)
+        freq_hz = 5000.0f;
     ledc_set_freq(VARIO_LEDC_MODE, VARIO_LEDC_TIMER, (uint32_t)freq_hz);
     const float max_duty = (1u << VARIO_LEDC_DUTY_RES) - 1u;
     uint32_t duty_val = (uint32_t)(duty * max_duty);
@@ -345,22 +346,22 @@ static void vario_task(void *arg)
             {
                 static float sim_t = 0.0f;
                 sim_t += dt;               // advance simulation time (seconds)
-                const float cycle = 32.0f; // total cycle length (s)
+                const float cycle = 42.0f; // total cycle length (s)
                 if (sim_t > cycle)
                     sim_t -= cycle;
 
                 float test_vs = 0.0f; // synthetic vertical speed (m/s)
 
-                if (sim_t < 12.0f)
+                if (sim_t < 4.0f)
                 {
                     // Near zero with gentle oscillation: ~ +/-0.5 m/s
-                    float r = sim_t / 12.0f;
+                    float r = sim_t / 4.0f;
                     test_vs = 1.0f * sinf(r * 2.0f * (float)M_PI);
                 }
                 else if (sim_t < 20.0f)
                 {
                     // Climb ramp: 0 -> +3 m/s
-                    float r = (sim_t - 12.0f) / 8.0f;
+                    float r = (sim_t - 4.0f) / 16.0f;
                     test_vs = r * 3.0f;
                 }
                 else if (sim_t < 24.0f)
@@ -374,11 +375,29 @@ static void vario_task(void *arg)
                     float r = (sim_t - 24.0f) / 4.0f;
                     test_vs = 3.0f - r * 2.0f;
                 }
-                else
+                else if (sim_t < 32.0f)
                 {
                     // Near zero with gentle oscillation: ~ +/-0.5 m/s
                     float r = (sim_t - 28.0f) / 4.0f;
                     test_vs = 0.8f * sinf(r * 2.0f * (float)M_PI);
+                }
+                else if (sim_t < 36.0f)
+                {
+                    // Sink ramp: 0 -> -7 m/s (tests sink alarm trigger)
+                    float r = (sim_t - 32.0f) / 4.0f;
+                    test_vs = -r * 7.0f;
+                }
+                else if (sim_t < 40.0f)
+                {
+                    // -7 m/s -> 0
+                    float r = (sim_t - 36.0f) / 4.0f;
+                    test_vs = -7.0f + r * 7.0f;
+                }
+                else
+                {
+                    // Recover with slight negative oscillation around -0.5..+0.5 m/s
+                    float r = (sim_t - 40.0f) / 4.0f;
+                    test_vs = 0.6f * sinf(r * 2.0f * (float)M_PI);
                 }
 
                 // Override reported vspeed so vario_get() reflects the test pattern.
@@ -465,6 +484,9 @@ void vario_init(void)
         };
         esp_timer_create(&off_args, &s_beep_off_timer);
     }
+
+    gpio_set_drive_capability(VARIO_BUZZER_GPIO_A, GPIO_DRIVE_CAP_3);
+    gpio_set_drive_capability(VARIO_BUZZER_GPIO_B, GPIO_DRIVE_CAP_3);
 
     xTaskCreate(vario_task, VARIO_TASK_NAME, VARIO_TASK_STACK, NULL, VARIO_TASK_PRIO, &s_task_handle);
 #if VARIO_BUZZER_ACTIVE
