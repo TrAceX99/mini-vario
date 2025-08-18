@@ -8,23 +8,17 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "driver/ledc.h"
+#include "driver/gpio.h"
 #include "baro.h"
 #include "bt.h"
 #include "config.h"
-
-#define VARIO_BUZZER_ACTIVE 1
 
 // Buzzer type selection:
 // Define VARIO_BUZZER_ACTIVE=1 (e.g. add -DVARIO_BUZZER_ACTIVE=1 to CFLAGS) if using a self-oscillating (active) buzzer
 // that only needs ON/OFF. Leave undefined or =0 for a passive transducer (default) driven by PWM (LEDC) with variable frequency.
 #ifndef VARIO_BUZZER_ACTIVE
 #define VARIO_BUZZER_ACTIVE 0
-#endif
-
-#if !VARIO_BUZZER_ACTIVE
-#include "driver/ledc.h"
-#else
-#include "driver/gpio.h"
 #endif
 
 // Configuration
@@ -34,8 +28,8 @@
 #define VARIO_SAMPLE_PERIOD_MS 50  // 20 Hz nominal loop
 #define VARIO_MIN_CLIMB_TONE 0.30f // m/s start climb beeps
 #define VARIO_MAX_CLIMB_TONE 3.00f
-#define VARIO_SINK_ALARM -2.00f // continuous sink tone threshold
-#define VARIO_BUZZER_GPIO 10    // GPIO for buzzer
+#define VARIO_SINK_ALARM 2.00f // continuous sink tone threshold
+#define VARIO_SINK_EXCESS_MAX 5.0f
 
 // Kalman filter tuning (altitude from baro only):
 // State x = [ altitude (m); vertical_speed (m/s) ]
@@ -51,13 +45,25 @@
 // Additional light smoothing of velocity for audio feel (first-order low-pass tau in ms).
 #define VARIO_VS_AUDIO_TAU_MS 180.0f
 
-// PWM configuration (passive buzzer only)
-#if !VARIO_BUZZER_ACTIVE
+// Audio parameters
+#define VARIO_BEEP_PERIOD_MIN_MS 200.0f
+#define VARIO_BEEP_PERIOD_MAX_MS 1000.0f
+#define VARIO_BEEP_ON_MIN 0.10f
+#define VARIO_BEEP_ON_MAX 0.50f
+
+#define VARIO_BUZZER_GPIO_A 10
+#define VARIO_BUZZER_GPIO_B 20
 #define VARIO_LEDC_TIMER LEDC_TIMER_0
 #define VARIO_LEDC_MODE LEDC_LOW_SPEED_MODE
-#define VARIO_LEDC_CHANNEL LEDC_CHANNEL_0
+#define VARIO_LEDC_CHANNEL_A LEDC_CHANNEL_0
+#define VARIO_LEDC_CHANNEL_B LEDC_CHANNEL_1
 #define VARIO_LEDC_DUTY_RES LEDC_TIMER_8_BIT
-#endif
+#define VARIO_CLIMB_FREQ_MIN 1000.0f
+#define VARIO_CLIMB_FREQ_MAX 3000.0f
+#define VARIO_CLIMB_BUZZER_DUTY 0.5f
+#define VARIO_SINK_FREQ_MAX 450.0f
+#define VARIO_SINK_FREQ_MIN 275.0f
+#define VARIO_SINK_BUZZER_DUTY 0.5f
 
 static const char *TAG = "VARIO";
 
@@ -86,9 +92,12 @@ static inline float pressure_to_altitude(double pressure_pa)
 #if !VARIO_BUZZER_ACTIVE
 static void buzzer_set(float freq_hz, float duty)
 {
+    // Differential drive: two LEDC channels, second inverted, sharing same timer.
+    // This doubles peak-to-peak voltage across the transducer for same supply.
     if (freq_hz <= 0.0f || duty <= 0.0f)
     {
-        ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL, 0);
+        ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_A, 0);
+        ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_B, 0);
         return;
     }
     if (freq_hz > 4000.0f)
@@ -96,8 +105,10 @@ static void buzzer_set(float freq_hz, float duty)
     ledc_set_freq(VARIO_LEDC_MODE, VARIO_LEDC_TIMER, (uint32_t)freq_hz);
     const float max_duty = (1u << VARIO_LEDC_DUTY_RES) - 1u;
     uint32_t duty_val = (uint32_t)(duty * max_duty);
-    ledc_set_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL, duty_val);
-    ledc_update_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL);
+    ledc_set_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_A, duty_val);
+    ledc_set_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_B, duty_val);
+    ledc_update_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_A);
+    ledc_update_duty(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_B);
 }
 #else
 static void buzzer_set(float freq_hz, float duty)
@@ -105,24 +116,18 @@ static void buzzer_set(float freq_hz, float duty)
     // Active buzzer: ignore frequency and duty specifics; treat any non-zero request as ON
     if (freq_hz <= 0.0f || duty <= 0.0f)
     {
-        gpio_hold_dis(VARIO_BUZZER_GPIO);
-        gpio_set_level(VARIO_BUZZER_GPIO, 0);
-        gpio_hold_en(VARIO_BUZZER_GPIO);
+        gpio_hold_dis(VARIO_BUZZER_GPIO_A);
+        gpio_set_level(VARIO_BUZZER_GPIO_A, 0);
+        gpio_hold_en(VARIO_BUZZER_GPIO_A);
     }
     else
     {
-        gpio_hold_dis(VARIO_BUZZER_GPIO);
-        gpio_set_level(VARIO_BUZZER_GPIO, 1);
-        gpio_hold_en(VARIO_BUZZER_GPIO);
+        gpio_hold_dis(VARIO_BUZZER_GPIO_A);
+        gpio_set_level(VARIO_BUZZER_GPIO_A, 1);
+        gpio_hold_en(VARIO_BUZZER_GPIO_A);
     }
 }
 #endif
-
-// Beep pattern parameters (period & duty chosen at cycle start; passive freq updated continuously during ON)
-#define VARIO_BEEP_PERIOD_MIN_MS 200.0f
-#define VARIO_BEEP_PERIOD_MAX_MS 1000.0f
-#define VARIO_BEEP_ON_MIN 0.10f
-#define VARIO_BEEP_ON_MAX 0.50f
 
 // Unified timer-based scheduling
 static esp_timer_handle_t s_beep_cycle_timer = NULL; // schedules next beep start
@@ -172,12 +177,11 @@ static void beep_cycle_cb(void *arg)
         on_us = 1000;
 #if VARIO_BUZZER_ACTIVE
     buzzer_set(1, 1);
-    s_beep_on = true;
 #else
-    float freq = 750.0f + frac * 1250.0f;
-    buzzer_set(freq, 0.50f);
-    s_beep_on = true;
+    float freq = VARIO_CLIMB_FREQ_MIN + frac * (VARIO_CLIMB_FREQ_MAX - VARIO_CLIMB_FREQ_MIN);
+    buzzer_set(freq, VARIO_CLIMB_BUZZER_DUTY);
 #endif
+    s_beep_on = true;
     if (s_beep_off_timer)
     {
         esp_timer_stop(s_beep_off_timer);
@@ -192,17 +196,16 @@ static void beep_cycle_cb(void *arg)
 static void update_audio(void)
 {
     // Sink alarm continuous tone
-    if (conf_enable_audio && !bt_is_connected() && s_vspeed <= VARIO_SINK_ALARM)
+    if (conf_enable_audio && !bt_is_connected() && s_vspeed <= -VARIO_SINK_ALARM)
     {
         cancel_beep_timers();
 #if VARIO_BUZZER_ACTIVE
         buzzer_set(1, 1);
 #else
-        float sink_excess = fminf(5.0f, (-s_vspeed) - (-VARIO_SINK_ALARM));
-        float freq = 450.0f - sink_excess * 35.0f;
-        if (freq < 200.0f)
-            freq = 200.0f;
-        buzzer_set(freq, 0.35f);
+        float sink_excess = fminf(VARIO_SINK_EXCESS_MAX, (-s_vspeed) - (VARIO_SINK_ALARM));
+        float frac = sink_excess / VARIO_SINK_EXCESS_MAX; // 0..1
+        float freq = VARIO_SINK_FREQ_MAX - frac * (VARIO_SINK_FREQ_MAX - VARIO_SINK_FREQ_MIN);
+        buzzer_set(freq, VARIO_SINK_BUZZER_DUTY);
 #endif
         return;
     }
@@ -226,8 +229,8 @@ static void update_audio(void)
     {
         float climb = clampf(s_vspeed, VARIO_MIN_CLIMB_TONE, VARIO_MAX_CLIMB_TONE);
         float frac = (climb - VARIO_MIN_CLIMB_TONE) / (VARIO_MAX_CLIMB_TONE - VARIO_MIN_CLIMB_TONE);
-        float freq = 750.0f + frac * 1250.0f;
-        buzzer_set(freq, 0.50f);
+        float freq = VARIO_CLIMB_FREQ_MIN + frac * (VARIO_CLIMB_FREQ_MAX - VARIO_CLIMB_FREQ_MIN);
+        buzzer_set(freq, VARIO_CLIMB_BUZZER_DUTY);
     }
 #endif
 }
@@ -389,6 +392,8 @@ static void vario_task(void *arg)
 
 void vario_init(void)
 {
+    gpio_hold_dis(VARIO_BUZZER_GPIO_A);
+    gpio_hold_dis(VARIO_BUZZER_GPIO_B);
     // Hardware init depends on buzzer type
 #if !VARIO_BUZZER_ACTIVE
     ledc_timer_config_t timer_cfg = {
@@ -396,32 +401,47 @@ void vario_init(void)
         .duty_resolution = VARIO_LEDC_DUTY_RES,
         .timer_num = VARIO_LEDC_TIMER,
         .freq_hz = 1000,
-        .clk_cfg = LEDC_AUTO_CLK,
+        .clk_cfg = LEDC_USE_RC_FAST_CLK,
     };
     ledc_timer_config(&timer_cfg);
 
-    ledc_channel_config_t ch_cfg = {
-        .gpio_num = VARIO_BUZZER_GPIO,
+    // Primary (non-inverted) channel
+    ledc_channel_config_t ch_cfg_a = {
+        .gpio_num = VARIO_BUZZER_GPIO_A,
         .speed_mode = VARIO_LEDC_MODE,
-        .channel = VARIO_LEDC_CHANNEL,
+        .channel = VARIO_LEDC_CHANNEL_A,
         .intr_type = LEDC_INTR_DISABLE,
         .timer_sel = VARIO_LEDC_TIMER,
         .duty = 0,
         .hpoint = 0,
         .flags.output_invert = 0,
+        .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
     };
-    ledc_channel_config(&ch_cfg);
+    ledc_channel_config(&ch_cfg_a);
+    // Secondary inverted channel for push-pull
+    ledc_channel_config_t ch_cfg_b = {
+        .gpio_num = VARIO_BUZZER_GPIO_B,
+        .speed_mode = VARIO_LEDC_MODE,
+        .channel = VARIO_LEDC_CHANNEL_B,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = VARIO_LEDC_TIMER,
+        .duty = 0,
+        .hpoint = 0,
+        .flags.output_invert = 1, // invert output!
+        .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
+    };
+    ledc_channel_config(&ch_cfg_b);
 #else
     gpio_config_t io = {
-        .pin_bit_mask = 1ULL << VARIO_BUZZER_GPIO,
+        .pin_bit_mask = 1ULL << VARIO_BUZZER_GPIO_A,
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = 0,
         .pull_down_en = 0,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io);
-    gpio_set_level(VARIO_BUZZER_GPIO, 0);
-    gpio_hold_en(VARIO_BUZZER_GPIO);
+    gpio_set_level(VARIO_BUZZER_GPIO_A, 0);
+    gpio_hold_en(VARIO_BUZZER_GPIO_A);
 #endif
 
     // Create (or reuse) timers for unified scheduling
@@ -448,9 +468,9 @@ void vario_init(void)
 
     xTaskCreate(vario_task, VARIO_TASK_NAME, VARIO_TASK_STACK, NULL, VARIO_TASK_PRIO, &s_task_handle);
 #if VARIO_BUZZER_ACTIVE
-    ESP_LOGI(TAG, "Variometer initialized (ACTIVE buzzer GPIO %d)", VARIO_BUZZER_GPIO);
+    ESP_LOGI(TAG, "Variometer initialized (ACTIVE buzzer GPIO %d)", VARIO_BUZZER_GPIO_A);
 #else
-    ESP_LOGI(TAG, "Variometer initialized (passive buzzer PWM GPIO %d)", VARIO_BUZZER_GPIO);
+    ESP_LOGI(TAG, "Variometer initialized (passive buzzer differential PWM GPIO %d/%d)", VARIO_BUZZER_GPIO_A, VARIO_BUZZER_GPIO_B);
 #endif
 }
 
