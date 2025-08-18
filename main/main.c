@@ -54,7 +54,7 @@ void app_main(void)
     esp_pm_config_t pm_config = {
         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
         .min_freq_mhz = CONFIG_XTAL_FREQ,
-        .light_sleep_enable = false,
+        .light_sleep_enable = true,
     };
     esp_pm_configure(&pm_config);
 

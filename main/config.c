@@ -22,12 +22,6 @@ bool config_set_uart(bool en)
 {
     bool prev = conf_enable_uart;
     conf_enable_uart = en;
-    esp_pm_config_t pm_config = {
-        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-        .min_freq_mhz = CONFIG_XTAL_FREQ,
-        .light_sleep_enable = !en,
-    };
-    esp_pm_configure(&pm_config);
     return prev;
 }
 bool config_set_audio(bool en)
@@ -98,16 +92,7 @@ bool config_apply_command(const char *cmd_in, char *out_resp, int resp_size)
         size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
         printf("DBG UPTIME=%lus\nHEAP(free=%u min=%u largest=%u)\n", uptime_s, (unsigned)free_heap, (unsigned)min_free_heap, (unsigned)largest_block);
 
-        // Enable light sleep during dump, workaround in order to print sleep stats
-        esp_pm_config_t pm_config = {
-            .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-            .min_freq_mhz = CONFIG_XTAL_FREQ,
-            .light_sleep_enable = true,
-        };
-        esp_pm_configure(&pm_config);
         esp_pm_dump_locks(stdout);
-        pm_config.light_sleep_enable = false;
-        esp_pm_configure(&pm_config);
 
         // Task stack high water marks (truncated list)
         #if (configUSE_TRACE_FACILITY == 1)

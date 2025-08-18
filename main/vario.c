@@ -97,7 +97,7 @@ static void buzzer_set(float freq_hz, float duty)
     if (freq_hz <= 0.0f || duty <= 0.0f)
     {
         ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_A, 0);
-        ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_B, 0);
+        ledc_stop(VARIO_LEDC_MODE, VARIO_LEDC_CHANNEL_B, 1);
         return;
     }
     if (freq_hz > 4000.0f)
