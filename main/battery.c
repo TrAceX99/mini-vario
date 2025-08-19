@@ -113,7 +113,6 @@ static float read_voltage_multisample(void)
         }
     }
     int raw_avg = raw_sum / BATTERY_MULTISAMPLE_COUNT;
-    printf("Battery raw reading: %d\n", raw_avg);
 
     int mv = 0;
     float volts = 0.0f;
@@ -128,7 +127,6 @@ static float read_voltage_multisample(void)
         float mv_approx = (raw_avg / 4095.0f) * ref_mv;
         volts = (mv_approx / 1000.0f) * BATTERY_DIVIDER_FACTOR;
     }
-    printf("Battery voltage reading: %.3fV\n", volts);
     return volts;
 }
 

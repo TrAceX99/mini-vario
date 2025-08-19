@@ -31,12 +31,16 @@
 #define VARIO_SINK_ALARM 2.00f // continuous sink tone threshold
 #define VARIO_SINK_EXCESS_MAX 5.0f
 
+// Light pressure smoothing (low intensity) ONLY for reported pressure (vario_get),
+// not used internally for Kalman / altitude calculations. Time constant ~100 ms.
+#define VARIO_PRESSURE_FILTER_TAU_S 0.1f
+
 // Kalman filter tuning (altitude from baro only):
 // State x = [ altitude (m); vertical_speed (m/s) ]
 // Constant-velocity model with white acceleration noise σ_a.
 // Choose σ_a to allow responsiveness to real climb/sink while rejecting noise.
-#define VARIO_KF_ACCEL_STD 1.2f     // m/s^2 (process accel noise std dev)
-#define VARIO_KF_MEAS_STD_BASE 0.7f // m (base measurement noise std dev)
+#define VARIO_KF_ACCEL_STD 1.5f     // m/s^2 (process accel noise std dev)
+#define VARIO_KF_MEAS_STD_BASE 0.75f // m (base measurement noise std dev)
 
 // Optional adaptive measurement scaling based on innovation magnitude.
 #define VARIO_KF_ADAPT_FACTOR_MAX 4.0f // cap multiplier
@@ -77,6 +81,7 @@ static float s_last_temperature = 0.0f;
 static bool s_sample_valid = false;
 static bool s_kf_initialized = false;
 static float s_p0 = 101325.0f; // reference pressure Pa captured at init
+static float s_pressure_filt = 0.0f; // exponentially smoothed pressure (Pa)
 
 // Kalman covariance matrix P (2x2):
 static float P00 = 4.0f, P01 = 0.0f, P10 = 0.0f, P11 = 4.0f; // start with generous uncertainty
@@ -264,6 +269,7 @@ static void vario_task(void *arg)
             if (pressure > 1000.0)
             {
                 s_p0 = pressure; // reference
+                s_pressure_filt = pressure;
                 s_altitude = pressure_to_altitude(pressure);
                 s_vspeed_raw = 0.0f;
                 s_vspeed = 0.0f;
@@ -310,10 +316,13 @@ static void vario_task(void *arg)
             P11 = P11_new;
 
             // 2. Measurement update (z = altitude from pressure)
-            float z = pressure_to_altitude(pressure);
-            s_last_pressure = pressure;
+            float z = pressure_to_altitude(pressure); // use raw pressure for estimation
+            s_last_pressure = pressure;               // store raw last pressure
             s_last_temperature = temperature;
             s_sample_valid = true;
+            // Update reporting filter (does not affect estimation)
+            float alpha_p = dt / (VARIO_PRESSURE_FILTER_TAU_S + dt);
+            s_pressure_filt += alpha_p * (pressure - s_pressure_filt);
             // Innovation
             float y = z - s_altitude;
 
@@ -348,9 +357,10 @@ static void vario_task(void *arg)
             P11 = P11_post;
 
             // 3. Light smoothing for vertical speed used for audio (separate from estimation accuracy)
-            float dt_ms = dt * 1000.0f;
-            float alpha_vs = dt_ms / (VARIO_VS_AUDIO_TAU_MS + dt_ms);
-            s_vspeed += alpha_vs * (s_vspeed_raw - s_vspeed);
+            // float dt_ms = dt * 1000.0f;
+            // float alpha_vs = dt_ms / (VARIO_VS_AUDIO_TAU_MS + dt_ms);
+            // s_vspeed += alpha_vs * (s_vspeed_raw - s_vspeed);
+            s_vspeed = s_vspeed_raw;
 
             // TEST: Simulate vertical speed patterns to exercise audio without real sensor motion.
             // Replaces real vspeed audio drive with synthetic profile cycling through sink, neutral, and climb.
@@ -533,7 +543,7 @@ bool vario_get(vario_data_t *out)
     {
         return false;
     }
-    out->pressure_pa = s_last_pressure;
+    out->pressure_pa = s_pressure_filt;
     out->temperature_c = s_last_temperature;
     out->altitude_m = s_altitude;
     out->vspeed_mps = s_vspeed;
