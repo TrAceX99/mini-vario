@@ -16,7 +16,7 @@ void baro_init(void);
 // Read current pressure (Pa) and temperature (°C) from the sensor.
 // Parameters must be valid non-null pointers.
 // On failure, values are set to 0.
-void baro_read(double *pressure, double *temperature);
+void baro_read(float *pressure, float *temperature);
 
 #ifdef __cplusplus
 }

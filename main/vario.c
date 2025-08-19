@@ -72,16 +72,16 @@ static TaskHandle_t s_task_handle = NULL;
 static float s_vspeed = 0.0f;     // public vertical speed (filtered for audio)
 static float s_vspeed_raw = 0.0f; // raw Kalman vertical speed
 static float s_altitude = 0.0f;   // current altitude estimate
-static double s_last_pressure = 0.0;
-static double s_last_temperature = 0.0;
+static float s_last_pressure = 0.0f;
+static float s_last_temperature = 0.0f;
 static bool s_sample_valid = false;
 static bool s_kf_initialized = false;
-static double s_p0 = 101325.0; // reference pressure Pa captured at init
+static float s_p0 = 101325.0f; // reference pressure Pa captured at init
 
 // Kalman covariance matrix P (2x2):
 static float P00 = 4.0f, P01 = 0.0f, P10 = 0.0f, P11 = 4.0f; // start with generous uncertainty
 
-static inline float pressure_to_altitude(double pressure_pa)
+static inline float pressure_to_altitude(float pressure_pa)
 {
     if (pressure_pa <= 0.0)
         return 0.0;
@@ -251,7 +251,7 @@ static void vario_task(void *arg)
 {
     (void)arg;
     int64_t prev_us = esp_timer_get_time();
-    double pressure = 0.0, temperature = 0.0;
+    float pressure = 0.0f, temperature = 0.0f;
 
     const TickType_t period = pdMS_TO_TICKS(VARIO_SAMPLE_PERIOD_MS);
     TickType_t last_wake_time = xTaskGetTickCount();

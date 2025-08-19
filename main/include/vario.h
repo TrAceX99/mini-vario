@@ -10,10 +10,10 @@ extern "C" {
 #endif
 
 typedef struct {
-	double pressure_pa;
-	double temperature_c;
-	float altitude_m;
-	float vspeed_mps;
+	float pressure_pa;     // Pascals
+	float temperature_c;   // Celsius
+	float altitude_m;      // meters
+	float vspeed_mps;      // m/s
 } vario_data_t;
 
 void vario_init(void);

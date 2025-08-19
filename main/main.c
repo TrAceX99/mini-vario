@@ -55,7 +55,7 @@ static uint8_t nmea_checksum(const char *nmea_str)
     return cksum;
 }
 
-static void format_LK8EX1_string(char *buf, double pressure, float climb, double temp, float battery)
+static void format_LK8EX1_string(char *buf, float pressure, float climb, float temp, float battery)
 {
     battery = battery * 100.0f + 1000.0f;
     sprintf(buf, "$LK8EX1,%.2f,99999,%.0f,%.1f,%.0f,*", pressure, climb * 100, temp, battery);

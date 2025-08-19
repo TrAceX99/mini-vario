@@ -131,7 +131,7 @@ void baro_init(void)
     }
 }
 
-void baro_read(double *pressure, double *temperature)
+void baro_read(float *pressure, float *temperature)
 {
     struct bmp3_data data = {0};
     int8_t res;
@@ -142,6 +142,16 @@ void baro_read(double *pressure, double *temperature)
         ESP_LOGE(TAG, "bmp3_get_sensor_data failed (%d)", res);
     }
 
-    *pressure = data.pressure;
-    *temperature = data.temperature;
+    /* In 64-bit compensation mode the driver returns scaled integer values:
+     * temperature: int64_t in 0.01 deg C (per Bosch driver spec when using int path)
+     * pressure:    uint64_t in Pa (already 1 Pa units)
+     * Confirm scaling and convert to float for the rest of the application.
+     */
+#ifdef BMP3_FLOAT_COMPENSATION
+    *pressure = (float)data.pressure;
+    *temperature = (float)data.temperature;
+#else
+    *pressure = (float)data.pressure / 100.0f;               // Pa
+    *temperature = (float)data.temperature / 100.0f; // convert 0.01C -> C
+#endif
 }
