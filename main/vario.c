@@ -46,10 +46,10 @@
 #define VARIO_VS_AUDIO_TAU_MS 180.0f
 
 // Audio parameters
-#define VARIO_BEEP_PERIOD_MIN_MS 200.0f
-#define VARIO_BEEP_PERIOD_MAX_MS 1000.0f
+#define VARIO_BEEP_PERIOD_MIN_MS 150.0f
+#define VARIO_BEEP_PERIOD_MAX_MS 500.0f
 #define VARIO_BEEP_ON_MIN 0.10f
-#define VARIO_BEEP_ON_MAX 0.50f
+#define VARIO_BEEP_ON_MAX 0.40f
 
 #define VARIO_BUZZER_GPIO_A 10
 #define VARIO_BUZZER_GPIO_B 20
@@ -58,13 +58,13 @@
 #define VARIO_LEDC_CHANNEL_A LEDC_CHANNEL_0
 #define VARIO_LEDC_CHANNEL_B LEDC_CHANNEL_1
 #define VARIO_LEDC_DUTY_RES LEDC_TIMER_8_BIT
-#define VARIO_CLIMB_FREQ_MIN 1000.0f
-#define VARIO_CLIMB_FREQ_MAX 3000.0f
+#define VARIO_CLIMB_FREQ_MIN 1700.0f
+#define VARIO_CLIMB_FREQ_MAX 2500.0f
 #define VARIO_CLIMB_BUZZER_DUTY 0.5f
 #define VARIO_SINK_FREQ_MAX 400.0f
 #define VARIO_SINK_FREQ_MIN 200.0f
 #define VARIO_SINK_BUZZER_DUTY 0.5f
-#define VARIO_BUZZER_RESONANT_FREQ 2100.0f
+#define VARIO_BUZZER_RESONANT_FREQ 2000.0f
 
 static const char *TAG = "VARIO";
 
@@ -84,10 +84,18 @@ static float P00 = 4.0f, P01 = 0.0f, P10 = 0.0f, P11 = 4.0f; // start with gener
 static inline float pressure_to_altitude(double pressure_pa)
 {
     if (pressure_pa <= 0.0)
-        return s_altitude; // guard
-    float ratio = (float)(s_p0 / pressure_pa);
-    float expv = powf(ratio, 0.190284f) - 1.0f; // (1/5.2558797)
-    return 44330.77f * expv;                    // meters
+        return 0.0;
+
+    // ISA standard atmosphere constants (troposphere)
+    const float T0 = 288.15;   // K
+    const float L  = 0.0065;   // K/m (temperature lapse rate)
+    const float g0 = 9.80665;  // m/s^2
+    const float R  = 287.053;  // J/(kg·K)
+
+    const float exponent = (R * L) / g0; // ≈ 0.190263
+    float ratio = s_p0 / pressure_pa;
+    float term = powf(ratio, exponent) - 1.0f;
+    return (T0 / L) * term; // meters
 }
 
 #if !VARIO_BUZZER_ACTIVE
@@ -131,75 +139,76 @@ static void buzzer_set(float freq_hz, float duty)
 #endif
 
 // Unified timer-based scheduling
-static esp_timer_handle_t s_beep_cycle_timer = NULL; // schedules next beep start
-static esp_timer_handle_t s_beep_off_timer = NULL;   // turns buzzer off in current cycle
-static bool s_in_climb_mode = false;
-static bool s_beep_on = false; // only meaningful for passive (LED PWM active)
+// Single timer state machine (toggles ON/OFF)
+static esp_timer_handle_t s_beep_timer = NULL; // one-shot; rearmed each transition
+static bool s_in_climb_mode = false;          // true while in climb beeping regime
+static bool s_beep_on = false;                // current buzzer state (tone active)
+static uint64_t s_beep_period_us = 0;         // full cycle length (for current ON phase)
+static uint64_t s_beep_on_us = 0;             // ON duration of current cycle
 
 // ---- Utility helpers (after macros) ----
 static inline float clampf(float v, float lo, float hi) { return (v < lo) ? lo : (v > hi) ? hi
                                                                                           : v; }
 
-static void cancel_beep_timers(void)
+static void cancel_beep_timer(void)
 {
-    if (s_beep_cycle_timer)
-        esp_timer_stop(s_beep_cycle_timer);
-    if (s_beep_off_timer)
-        esp_timer_stop(s_beep_off_timer);
+    if (s_beep_timer)
+        esp_timer_stop(s_beep_timer);
     s_beep_on = false;
     s_in_climb_mode = false;
+    buzzer_set(0, 0);
 }
 
-static void beep_off_cb(void *arg)
-{
-    (void)arg;
-    s_beep_on = false;
-    buzzer_set(0, 0); // stop tone or turn off active buzzer
-}
-
-static void beep_cycle_cb(void *arg)
+static void beep_timer_cb(void *arg)
 {
     (void)arg;
 
-    // Map vs -> frac 0..1
-    float climb = clampf(s_vspeed, VARIO_MIN_CLIMB_TONE, VARIO_MAX_CLIMB_TONE);
-    float frac = (climb - VARIO_MIN_CLIMB_TONE) / (VARIO_MAX_CLIMB_TONE - VARIO_MIN_CLIMB_TONE);
-    frac = clampf(frac, 0.0f, 1.0f);
+    if (!s_beep_on)
+    {
+        // Transition OFF -> ON: compute cycle parameters from current vertical speed
+        float frac = (s_vspeed - VARIO_MIN_CLIMB_TONE) / (VARIO_MAX_CLIMB_TONE - VARIO_MIN_CLIMB_TONE);
+        frac = clampf(frac, 0.0f, 1.0f);
 
-    float period_ms = VARIO_BEEP_PERIOD_MAX_MS - frac * (VARIO_BEEP_PERIOD_MAX_MS - VARIO_BEEP_PERIOD_MIN_MS);
-    period_ms = clampf(period_ms, VARIO_BEEP_PERIOD_MIN_MS, VARIO_BEEP_PERIOD_MAX_MS);
+        float period_ms = VARIO_BEEP_PERIOD_MAX_MS - frac * (VARIO_BEEP_PERIOD_MAX_MS - VARIO_BEEP_PERIOD_MIN_MS);
+        float on_duty = VARIO_BEEP_ON_MIN + frac * (VARIO_BEEP_ON_MAX - VARIO_BEEP_ON_MIN);
 
-    float on_duty = VARIO_BEEP_ON_MIN + frac * (VARIO_BEEP_ON_MAX - VARIO_BEEP_ON_MIN);
-    on_duty = clampf(on_duty, VARIO_BEEP_ON_MIN, VARIO_BEEP_ON_MAX);
+        float period_us = period_ms * 1000.0f;
+        s_beep_period_us = (uint64_t)(period_us);
+        s_beep_on_us = (uint64_t)(period_us * on_duty);
 
-    uint64_t period_us = (uint64_t)(period_ms * 1000.0f);
-    uint64_t on_us = (uint64_t)(period_ms * on_duty * 1000.0f);
-    if (on_us < 1000)
-        on_us = 1000;
 #if VARIO_BUZZER_ACTIVE
-    buzzer_set(1, 1);
+        buzzer_set(1, 1);
 #else
-    float freq = VARIO_CLIMB_FREQ_MIN + frac * (VARIO_CLIMB_FREQ_MAX - VARIO_CLIMB_FREQ_MIN);
-    buzzer_set(freq, VARIO_CLIMB_BUZZER_DUTY);
+        float freq = VARIO_CLIMB_FREQ_MIN + frac * (VARIO_CLIMB_FREQ_MAX - VARIO_CLIMB_FREQ_MIN);
+        buzzer_set(freq, VARIO_CLIMB_BUZZER_DUTY);
 #endif
-    s_beep_on = true;
-    if (s_beep_off_timer)
-    {
-        esp_timer_stop(s_beep_off_timer);
-        esp_timer_start_once(s_beep_off_timer, on_us);
+        s_beep_on = true;
+        if (s_beep_timer)
+            esp_timer_start_once(s_beep_timer, s_beep_on_us);
     }
-    if (s_beep_cycle_timer)
+    else
     {
-        esp_timer_start_once(s_beep_cycle_timer, period_us);
+        // Transition ON -> OFF
+        buzzer_set(0, 0);
+        s_beep_on = false;
+        uint64_t off_us = s_beep_period_us - s_beep_on_us;
+        if (s_beep_timer)
+            esp_timer_start_once(s_beep_timer, off_us);
     }
 }
 
 static void update_audio(void)
 {
-    // Sink alarm continuous tone
-    if (conf_enable_audio && !bt_is_connected() && s_vspeed <= -VARIO_SINK_ALARM)
+    if (!conf_enable_audio || bt_is_connected())
     {
-        cancel_beep_timers();
+        cancel_beep_timer();
+        return;
+    }
+
+    // Sink alarm continuous tone
+    if (s_vspeed <= -VARIO_SINK_ALARM)
+    {
+        cancel_beep_timer();
 #if VARIO_BUZZER_ACTIVE
         buzzer_set(1, 1);
 #else
@@ -211,21 +220,22 @@ static void update_audio(void)
         return;
     }
     // Neutral / disabled
-    if (!conf_enable_audio || bt_is_connected() || s_vspeed < VARIO_MIN_CLIMB_TONE)
+    else if (s_vspeed < VARIO_MIN_CLIMB_TONE)
     {
-        cancel_beep_timers();
-        buzzer_set(0, 0);
+        cancel_beep_timer();
         return;
     }
-    // Enter climb mode if needed
-    if (!s_in_climb_mode)
+    // Enter climb mode if needed: start immediate ON phase via callback
+    else if (!s_in_climb_mode)
     {
         s_in_climb_mode = true;
-        beep_cycle_cb(NULL);
+        s_beep_on = false; // ensure OFF->ON transition
+        beep_timer_cb(NULL);
         return;
     }
 #if !VARIO_BUZZER_ACTIVE
-    // Passive: update frequency during ON phase
+    // Passive: adjust frequency mid-ON for responsiveness
+    taskENTER_CRITICAL(NULL);
     if (s_beep_on)
     {
         float climb = clampf(s_vspeed, VARIO_MIN_CLIMB_TONE, VARIO_MAX_CLIMB_TONE);
@@ -233,6 +243,7 @@ static void update_audio(void)
         float freq = VARIO_CLIMB_FREQ_MIN + frac * (VARIO_CLIMB_FREQ_MAX - VARIO_CLIMB_FREQ_MIN);
         buzzer_set(freq, VARIO_CLIMB_BUZZER_DUTY);
     }
+    taskEXIT_CRITICAL(NULL);
 #endif
 }
 
@@ -371,21 +382,20 @@ static void vario_task(void *arg)
                 }
                 else if (sim_t < 28.0f)
                 {
-                    // Decay climb: +3 -> +1 m/s
+                    // Climb ramp: +3 -> +5m/s
                     float r = (sim_t - 24.0f) / 4.0f;
-                    test_vs = 3.0f - r * 2.0f;
+                    test_vs = 3.0f + r * 2.0f;
                 }
                 else if (sim_t < 32.0f)
                 {
-                    // Near zero with gentle oscillation: ~ +/-0.5 m/s
-                    float r = (sim_t - 28.0f) / 4.0f;
-                    test_vs = 0.8f * sinf(r * 2.0f * (float)M_PI);
+                    // Hold climb: +5 m/s
+                    test_vs = 5.0f;
                 }
                 else if (sim_t < 36.0f)
                 {
-                    // Sink ramp: 0 -> -7 m/s (tests sink alarm trigger)
+                    // Near zero with gentle oscillation: ~ +/-0.5 m/s
                     float r = (sim_t - 32.0f) / 4.0f;
-                    test_vs = -r * 7.0f;
+                    test_vs = 0.1f * sinf(r * 2.0f * (float)M_PI);
                 }
                 else if (sim_t < 40.0f)
                 {
@@ -463,27 +473,47 @@ void vario_init(void)
     gpio_hold_en(VARIO_BUZZER_GPIO_A);
 #endif
 
-    // Create (or reuse) timers for unified scheduling
-    if (!s_beep_cycle_timer)
+    // Create single state-machine timer
+    if (!s_beep_timer)
     {
-        const esp_timer_create_args_t cycle_args = {
-            .callback = &beep_cycle_cb,
+        const esp_timer_create_args_t targs = {
+            .callback = &beep_timer_cb,
             .arg = NULL,
             .dispatch_method = ESP_TIMER_TASK,
-            .name = "beep_cycle",
+            .name = "beep",
         };
-        esp_timer_create(&cycle_args, &s_beep_cycle_timer);
+        esp_timer_create(&targs, &s_beep_timer);
     }
-    if (!s_beep_off_timer)
-    {
-        const esp_timer_create_args_t off_args = {
-            .callback = &beep_off_cb,
-            .arg = NULL,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "beep_off",
-        };
-        esp_timer_create(&off_args, &s_beep_off_timer);
-    }
+
+    // test code for freq response
+    // Simple blocking sweep test of buzzer frequency response.
+    // Runs once at startup before the vario task begins producing tones.
+    // Adjust ranges / step / dwell as desired.
+    // {
+    //     ESP_LOGI(TAG, "Starting buzzer frequency sweep test");
+    // #if VARIO_BUZZER_ACTIVE
+    //     // For active buzzer just toggle on/off at a few pseudo "freq" placeholders.
+    //     for (int i = 0; i < 5; ++i) {
+    //         buzzer_set(1, 1);
+    //         vTaskDelay(pdMS_TO_TICKS(300));
+    //         buzzer_set(0, 0);
+    //         vTaskDelay(pdMS_TO_TICKS(150));
+    //     }
+    // #else
+    //     const int f_start = 1000;    // Hz
+    //     const int f_end   = 3000;   // Hz (limited by code later to 5 kHz)
+    //     const int f_step  = 100;    // Hz
+    //     const int dwell_ms = 1000;   // time at each frequency
+    //     // Up sweep
+    //     for (int f = f_start; f <= f_end; f += f_step) {
+    //         buzzer_set((float)f, 0.5f);
+    //         printf("Buzzer frequency sweep: %d Hz\n", f);
+    //         vTaskDelay(pdMS_TO_TICKS(dwell_ms));
+    //     }
+    //     buzzer_set(0, 0);
+    // #endif
+    //     ESP_LOGI(TAG, "Buzzer frequency sweep test complete");
+    // }
 
     gpio_set_drive_capability(VARIO_BUZZER_GPIO_A, GPIO_DRIVE_CAP_3);
     gpio_set_drive_capability(VARIO_BUZZER_GPIO_B, GPIO_DRIVE_CAP_3);
