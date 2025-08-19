@@ -13,10 +13,10 @@
 #include "freertos/task.h"
 #include "battery.h"
 
-volatile bool conf_enable_uart = true;
+volatile bool conf_enable_uart = false;
 volatile bool conf_enable_audio = true;
-volatile bool conf_enable_bluetooth = true;
 volatile bool conf_send_vario = true;
+volatile bool conf_test_mode = false;
 
 bool config_set_uart(bool en)
 {
@@ -24,18 +24,14 @@ bool config_set_uart(bool en)
     conf_enable_uart = en;
     return prev;
 }
+
 bool config_set_audio(bool en)
 {
     bool prev = conf_enable_audio;
     conf_enable_audio = en;
     return prev;
 }
-bool config_set_bluetooth(bool en)
-{
-    bool prev = conf_enable_bluetooth;
-    conf_enable_bluetooth = en;
-    return prev;
-}
+
 bool config_set_send_vario(bool en)
 {
     bool prev = conf_send_vario;
@@ -43,11 +39,18 @@ bool config_set_send_vario(bool en)
     return prev;
 }
 
+bool config_set_test_mode(bool en)
+{
+    bool prev = conf_test_mode;
+    conf_test_mode = en;
+    return prev;
+}
+
 void config_format_status(char *buffer, int bufsize)
 {
     if (!buffer || bufsize < 8)
         return;
-    snprintf(buffer, bufsize, "CFG UART=%d AUDIO=%d BLE=%d VARIO=%d\n", conf_enable_uart ? 1 : 0, conf_enable_audio ? 1 : 0, conf_enable_bluetooth ? 1 : 0, conf_send_vario ? 1 : 0);
+    snprintf(buffer, bufsize, "CFG UART=%d AUDIO=%d VARIO=%d\n", conf_enable_uart ? 1 : 0, conf_enable_audio ? 1 : 0, conf_send_vario ? 1 : 0);
 }
 
 static void str_toupper(char *s)
@@ -94,12 +97,12 @@ bool config_apply_command(const char *cmd_in, char *out_resp, int resp_size)
 
         esp_pm_dump_locks(stdout);
 
-        // Task stack high water marks (truncated list)
-        #if (configUSE_TRACE_FACILITY == 1)
+// Task stack high water marks (truncated list)
+#if (configUSE_TRACE_FACILITY == 1)
         {
-            #ifndef MAX_DBG_TASKS
-            #define MAX_DBG_TASKS 16
-            #endif
+#ifndef MAX_DBG_TASKS
+#define MAX_DBG_TASKS 16
+#endif
             TaskStatus_t taskStatusArray[MAX_DBG_TASKS];
             UBaseType_t total = uxTaskGetSystemState(taskStatusArray, MAX_DBG_TASKS, NULL);
             printf("TASKS total=%u (showing up to %u)\n", (unsigned)uxTaskGetNumberOfTasks(), (unsigned)total);
@@ -123,12 +126,12 @@ bool config_apply_command(const char *cmd_in, char *out_resp, int resp_size)
             if (uxTaskGetNumberOfTasks() > total)
                 printf(" ...truncated\n");
         }
-        #else
-            printf("TASK STATS DISABLED (configUSE_TRACE_FACILITY=0)\n");
-        #endif
+#else
+        printf("TASK STATS DISABLED (configUSE_TRACE_FACILITY=0)\n");
+#endif
 
         // Current configuration snapshot
-        printf("CFG UART=%d AUDIO=%d BLE=%d VARIO=%d\n", conf_enable_uart?1:0, conf_enable_audio?1:0, conf_enable_bluetooth?1:0, conf_send_vario?1:0);
+    printf("CFG UART=%d AUDIO=%d VARIO=%d TEST=%d\n", conf_enable_uart ? 1 : 0, conf_enable_audio ? 1 : 0, conf_send_vario ? 1 : 0, conf_test_mode ? 1 : 0);
 
         printf("BATTERY %.0f%% voltage=%.3fV\n", battery_get() * 100.0f, battery_get_voltage());
 
@@ -154,14 +157,14 @@ bool config_apply_command(const char *cmd_in, char *out_resp, int resp_size)
         config_set_audio(v);
         updated = true;
     }
-    else if (strcmp(local, "BLE") == 0)
-    {
-        config_set_bluetooth(v);
-        updated = true;
-    }
     else if (strcmp(local, "VARIO") == 0)
     {
         config_set_send_vario(v);
+        updated = true;
+    }
+    else if (strcmp(local, "TEST") == 0)
+    {
+        config_set_test_mode(v);
         updated = true;
     }
     else

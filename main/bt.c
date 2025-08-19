@@ -33,6 +33,7 @@ static uint8_t addr_val[6] = {0};
 static uint16_t nus_conn_handle = 0;
 static uint16_t nus_tx_val_handle = 0;
 static uint16_t nus_rx_val_handle = 0;
+static bool ever_connected = false;
 
 static int ble_gap_event_cb(struct ble_gap_event *event, void *arg);
 static int gatts_nus_access_cb(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt, void *arg);
@@ -111,6 +112,7 @@ static int ble_gap_event_cb(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0)
         {
             nus_conn_handle = event->connect.conn_handle;
+            ever_connected = true;
             ESP_LOGI(TAG, "Connected; conn_handle=%d", nus_conn_handle);
             // print connection descriptor
             struct ble_gap_conn_desc desc;
@@ -220,6 +222,7 @@ static void host_task(void *param)
 }
 
 bool bt_is_connected(void) { return nus_conn_handle != 0; }
+bool bt_has_ever_connected(void) { return ever_connected; }
 
 int bt_nus_send(const void *data, uint16_t len)
 {
@@ -287,5 +290,23 @@ int bt_init(void)
     nimble_port_freertos_init(host_task);
 
     ESP_LOGI(TAG, "BLE init done");
+    return 0;
+}
+
+int bt_deinit(void)
+{
+    ESP_LOGI(TAG, "Shutting down BLE stack");
+    // Stop advertising (ignore errors)
+    ble_gap_adv_stop();
+    // Disconnect if connected
+    if (nus_conn_handle != 0) {
+        ble_gap_terminate(nus_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        nus_conn_handle = 0;
+    }
+    // Stop NimBLE host task
+    nimble_port_stop();
+    nimble_port_freertos_deinit();
+    nimble_port_deinit();
+    ESP_LOGI(TAG, "BLE stack shutdown complete");
     return 0;
 }

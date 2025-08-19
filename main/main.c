@@ -11,6 +11,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_pm.h"
+#include "freertos/timers.h"
 
 #include "bt.h"
 #include "baro.h"
@@ -19,6 +20,28 @@
 #include "battery.h"
 
 #define TAG "APP"
+
+// Configurable BLE auto-shutdown timeout (seconds). Override by defining before including this file.
+#ifndef BLE_CONNECTION_TIMEOUT_S
+#define BLE_CONNECTION_TIMEOUT_S 60
+#endif
+
+// FreeRTOS one-shot timer for deferred BLE shutdown
+static TimerHandle_t ble_stop_timer = NULL;
+static void ble_timeout_cb(TimerHandle_t timer)
+{
+    (void)timer;
+    if (!bt_has_ever_connected()) {
+        ESP_LOGI(TAG, "No BLE connection after 30s -> disabling BLE stack (RTOS timer)");
+        bt_deinit();
+    } else {
+        ESP_LOGI(TAG, "BLE connected before timeout; not disabling stack");
+    }
+    if (ble_stop_timer) {
+        xTimerDelete(ble_stop_timer, 0);
+        ble_stop_timer = NULL;
+    }
+}
 
 static uint8_t nmea_checksum(const char *nmea_str)
 {
@@ -44,9 +67,7 @@ static void format_LK8EX1_string(char *buf, double pressure, float climb, double
 
 void app_main(void)
 {
-    if (conf_enable_bluetooth) {
-        bt_init();
-    }
+    bt_init();
     baro_init();
     vario_init();
     battery_init();
@@ -58,14 +79,23 @@ void app_main(void)
     };
     esp_pm_configure(&pm_config);
 
+    // Create one-shot FreeRTOS timer (BLE_CONNECTION_TIMEOUT_S seconds)
+    ble_stop_timer = xTimerCreate("bleStop", pdMS_TO_TICKS(BLE_CONNECTION_TIMEOUT_S * 1000), pdFALSE, NULL, ble_timeout_cb);
+    if (ble_stop_timer) {
+        if (xTimerStart(ble_stop_timer, 0) != pdPASS) {
+            ESP_LOGW(TAG, "Failed to start BLE stop timer");
+            xTimerDelete(ble_stop_timer, 0);
+            ble_stop_timer = NULL;
+        }
+    } else {
+        ESP_LOGW(TAG, "Failed to create BLE stop timer");
+    }
+
     vario_data_t data;
     const TickType_t period = pdMS_TO_TICKS(200);
     TickType_t last = xTaskGetTickCount();
     while (1) {
-        BaseType_t delayed = xTaskDelayUntil(&last, period);
-        if (unlikely(delayed != pdTRUE)) {
-            ESP_LOGW(TAG, "Task delayed");
-        }
+        xTaskDelayUntil(&last, period);
         if (vario_get(&data)) {
             if (!conf_send_vario) {
                 data.vspeed_mps = 99.99f;
@@ -77,8 +107,6 @@ void app_main(void)
             }
             if (conf_enable_uart) {
                 printf("%s", msg);
-                // esp_pm_dump_locks(stdout);
-                // fflush(stdout);
             }
         }
     }

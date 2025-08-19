@@ -9,15 +9,9 @@ extern "C" {
 
 extern volatile bool conf_enable_uart;
 extern volatile bool conf_enable_audio;
-extern volatile bool conf_enable_bluetooth;
 extern volatile bool conf_send_vario;
+extern volatile bool conf_test_mode;
 
-bool config_set_uart(bool en);
-bool config_set_audio(bool en);
-bool config_set_bluetooth(bool en);
-bool config_set_send_vario(bool en);
-
-void config_format_status(char *buffer, int bufsize);
 bool config_apply_command(const char *cmd, char *out_resp, int resp_size);
 
 #ifdef __cplusplus

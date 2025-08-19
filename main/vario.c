@@ -36,7 +36,7 @@
 // Constant-velocity model with white acceleration noise σ_a.
 // Choose σ_a to allow responsiveness to real climb/sink while rejecting noise.
 #define VARIO_KF_ACCEL_STD 1.2f     // m/s^2 (process accel noise std dev)
-#define VARIO_KF_MEAS_STD_BASE 0.8f // m (base measurement noise std dev)
+#define VARIO_KF_MEAS_STD_BASE 0.7f // m (base measurement noise std dev)
 
 // Optional adaptive measurement scaling based on innovation magnitude.
 #define VARIO_KF_ADAPT_FACTOR_MAX 4.0f // cap multiplier
@@ -354,6 +354,7 @@ static void vario_task(void *arg)
 
             // TEST: Simulate vertical speed patterns to exercise audio without real sensor motion.
             // Replaces real vspeed audio drive with synthetic profile cycling through sink, neutral, and climb.
+            if (conf_test_mode)
             {
                 static float sim_t = 0.0f;
                 sim_t += dt;               // advance simulation time (seconds)
