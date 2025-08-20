@@ -26,10 +26,10 @@
 #define VARIO_TASK_STACK 4096
 #define VARIO_TASK_PRIO 4
 #define VARIO_SAMPLE_PERIOD_MS 50  // 20 Hz nominal loop
-#define VARIO_MIN_CLIMB_TONE 0.20f // m/s start climb beeps
-#define VARIO_MAX_CLIMB_TONE 5.00f
-#define VARIO_MIN_SINK_TONE 2.00f // continuous sink tone threshold
-#define VARIO_MAX_SINK_TONE 5.0f
+#define VARIO_MIN_CLIMB_TONE conf_climb_min
+#define VARIO_MAX_CLIMB_TONE conf_climb_max
+#define VARIO_MIN_SINK_TONE  conf_sink_min
+#define VARIO_MAX_SINK_TONE  conf_sink_max
 
 // Light pressure smoothing (low intensity) ONLY for reported pressure (vario_get),
 // not used internally for Kalman / altitude calculations. Time constant ~100 ms.
@@ -39,7 +39,7 @@
 // State x = [ altitude (m); vertical_speed (m/s) ]
 // Constant-velocity model with white acceleration noise σ_a.
 // Choose σ_a to allow responsiveness to real climb/sink while rejecting noise.
-#define VARIO_KF_ACCEL_STD 1.5f      // m/s^2 (process accel noise std dev)
+#define VARIO_KF_ACCEL_STD conf_kf_accel_std      // m/s^2 (process accel noise std dev)
 #define VARIO_KF_MEAS_STD_BASE 0.75f // m (base measurement noise std dev)
 
 // Optional adaptive measurement scaling based on innovation magnitude.
@@ -70,7 +70,7 @@
 #define VARIO_BUZZER_PWM_DUTY 0.5f
 
 // Inactivity (anti-forgetfulness) reminder: single short beep if neutral & silent for this long
-#define VARIO_INACTIVITY_TIMEOUT_S 100 // seconds of no climb/sink activity
+#define VARIO_INACTIVITY_TIMEOUT_S conf_inact_timeout_s // seconds of no climb/sink activity
 
 static const char *TAG = "VARIO";
 
@@ -293,7 +293,7 @@ static void audio_set_state(vario_audio_state_t st)
 
 static void update_audio(void)
 {
-    if (!conf_enable_audio || bt_is_connected())
+    if (!conf_enable_audio || (!conf_audio_bt && bt_is_connected()))
     {
         audio_set_state(VARIO_AUDIO_DISABLED);
         return;

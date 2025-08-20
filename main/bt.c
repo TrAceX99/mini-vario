@@ -173,7 +173,7 @@ static int gatts_nus_access_cb(uint16_t conn_handle, uint16_t attr_handle, struc
         ble_hs_mbuf_to_flat(ctxt->om, buf, sizeof(buf)-1, &copied);
         buf[copied] = '\0';
         ESP_LOGI(TAG, "RX CMD: %s", buf);
-        char resp[64] = {0};
+        char resp[128] = {0};
         if (config_apply_command((const char*)buf, resp, sizeof(resp))) {
             if (resp[0]) {
                 bt_nus_send(resp, (uint16_t)strlen(resp));
