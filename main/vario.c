@@ -52,7 +52,7 @@
 // Audio parameters
 #define VARIO_BEEP_PERIOD_MIN_MS 150.0f
 #define VARIO_BEEP_PERIOD_MAX_MS 500.0f
-#define VARIO_BEEP_ON_MIN 0.10f
+#define VARIO_BEEP_ON_MIN 0.15f
 #define VARIO_BEEP_ON_MAX 0.40f
 
 #define VARIO_BUZZER_GPIO_A 10
@@ -87,7 +87,7 @@ static float s_pressure_filt = 0.0f;   // exponentially smoothed pressure (Pa)
 static int64_t s_last_activity_us = 0; // last time we had meaningful vertical activity or emitted reminder
 
 // Kalman covariance matrix P (2x2):
-static float P00 = 4.0f, P01 = 0.0f, P10 = 0.0f, P11 = 4.0f; // start with generous uncertainty
+static float P00 = 1.0f, P01 = 0.0f, P10 = 0.0f, P11 = 1.0f;
 
 // Audio state machine -------------------------------------------------------
 typedef enum
@@ -162,7 +162,7 @@ static inline float compute_climb_beep_duration_ms(bool is_on_period)
 {
     float frac = (s_vspeed - VARIO_MIN_CLIMB_TONE) / (VARIO_MAX_CLIMB_TONE - VARIO_MIN_CLIMB_TONE);
     frac = clampf(frac, 0.0f, 1.0f);
-    float period_ms = VARIO_BEEP_PERIOD_MIN_MS + frac * (VARIO_BEEP_PERIOD_MAX_MS - VARIO_BEEP_PERIOD_MIN_MS);
+    float period_ms = VARIO_BEEP_PERIOD_MAX_MS - frac * (VARIO_BEEP_PERIOD_MAX_MS - VARIO_BEEP_PERIOD_MIN_MS);
     float on_duty = VARIO_BEEP_ON_MIN + frac * (VARIO_BEEP_ON_MAX - VARIO_BEEP_ON_MIN);
     if (is_on_period)
     {
@@ -284,6 +284,7 @@ static void audio_set_state(vario_audio_state_t st)
     case VARIO_AUDIO_CLIMB:
         if (prev_state != VARIO_AUDIO_CLIMB)
         {
+            update_beep_frequency();
             beep_start();
         }
         break;
@@ -312,6 +313,74 @@ static void update_audio(void)
     }
 }
 
+// Simplified synthetic vertical speed pattern focused on tone evaluation.
+// Segment plan (cycle ~125 s):
+//   0-20s  : ramp 0 -> 2 m/s (slow rise)
+//   20-25s : hold 2 m/s (short plateau)
+//   25-45s : ramp 2 -> CLIMB_HIGH
+//   45-50s : hold CLIMB_HIGH (5 s)
+//   50-90s : ramp CLIMB_HIGH -> 0 (slow fall)
+//   90-95s : ramp 0 -> -2 m/s (enter mild sink)
+//   95-100s: hold -2 m/s (short sink plateau to hear sink tone onset)
+//   100-105s: ramp -2 -> -5 m/s
+//   105-125s: sine oscillation around VARIO_MIN_CLIMB_TONE (2 cycles) then repeat
+static float vario_test_pattern(float dt)
+{
+    static float sim_t = 0.0f;
+    sim_t += dt;
+    const float cycle = 125.0f;
+    if (sim_t > cycle)
+        sim_t -= cycle;
+
+    float t = sim_t;
+    float vs = 0.0f;
+    const float CLIMB_HIGH = 4.5f;
+
+    if (t < 20.0f) // 0-20 ramp 0->2
+    {
+        float r = t / 20.0f;
+        vs = r * 2.0f;
+    }
+    else if (t < 25.0f) // hold 2 m/s
+    {
+        vs = 2.0f;
+    }
+    else if (t < 45.0f) // ramp 2 -> CLIMB_HIGH
+    {
+        float r = (t - 25.0f) / 20.0f;
+        vs = 2.0f + r * (CLIMB_HIGH - 2.0f);
+    }
+    else if (t < 50.0f) // short high plateau (5 s)
+    {
+        vs = CLIMB_HIGH;
+    }
+    else if (t < 90.0f) // ramp down CLIMB_HIGH -> 0
+    {
+        float r = (t - 50.0f) / 40.0f;
+        vs = CLIMB_HIGH * (1.0f - r);
+    }
+    else if (t < 95.0f) // ramp 0 -> -2
+    {
+        float r = (t - 90.0f) / 5.0f; // 0..1
+        vs = -2.0f * r;
+    }
+    else if (t < 100.0f) // hold -2
+    {
+        vs = -2.0f;
+    }
+    else if (t < 105.0f) // ramp -2 -> -5
+    {
+        float r = (t - 100.0f) / 5.0f; // 0..1
+        vs = -2.0f - r * 3.0f;
+    }
+    else // 105-125 threshold oscillation (2 cycles)
+    {
+        float r = (t - 105.0f) / 20.0f; // 0..1
+        vs = VARIO_MIN_CLIMB_TONE + 0.07f * sinf(r * 2.0f * (float)M_PI * 2.0f);
+    }
+    return vs;
+}
+
 static void vario_task(void *arg)
 {
     (void)arg;
@@ -334,10 +403,10 @@ static void vario_task(void *arg)
                 s_vspeed_raw = 0.0f;
                 s_vspeed = 0.0f;
                 // Reset covariance
-                P00 = 10.0f;
+                P00 = 2.0f;
                 P01 = 0.0f;
                 P10 = 0.0f;
-                P11 = 10.0f;
+                P11 = 0.01f;
                 s_kf_initialized = true;
                 prev_us = esp_timer_get_time();
             }
@@ -426,63 +495,7 @@ static void vario_task(void *arg)
             // Replaces real vspeed audio drive with synthetic profile cycling through sink, neutral, and climb.
             if (conf_test_mode)
             {
-                static float sim_t = 0.0f;
-                sim_t += dt;               // advance simulation time (seconds)
-                const float cycle = 42.0f; // total cycle length (s)
-                if (sim_t > cycle)
-                    sim_t -= cycle;
-
-                float test_vs = 0.0f; // synthetic vertical speed (m/s)
-
-                if (sim_t < 4.0f)
-                {
-                    // Near zero with gentle oscillation: ~ +/-0.5 m/s
-                    float r = sim_t / 4.0f;
-                    test_vs = 1.0f * sinf(r * 2.0f * (float)M_PI);
-                }
-                else if (sim_t < 20.0f)
-                {
-                    // Climb ramp: 0 -> +3 m/s
-                    float r = (sim_t - 4.0f) / 16.0f;
-                    test_vs = r * 3.0f;
-                }
-                else if (sim_t < 24.0f)
-                {
-                    // Hold strong climb: +3 m/s
-                    test_vs = 3.0f;
-                }
-                else if (sim_t < 28.0f)
-                {
-                    // Climb ramp: +3 -> +5m/s
-                    float r = (sim_t - 24.0f) / 4.0f;
-                    test_vs = 3.0f + r * 2.0f;
-                }
-                else if (sim_t < 32.0f)
-                {
-                    // Hold climb: +5 m/s
-                    test_vs = 5.0f;
-                }
-                else if (sim_t < 36.0f)
-                {
-                    // Near zero with gentle oscillation: ~ +/-0.5 m/s
-                    float r = (sim_t - 32.0f) / 4.0f;
-                    test_vs = 0.1f * sinf(r * 2.0f * (float)M_PI);
-                }
-                else if (sim_t < 40.0f)
-                {
-                    // -7 m/s -> 0
-                    float r = (sim_t - 36.0f) / 4.0f;
-                    test_vs = -7.0f + r * 7.0f;
-                }
-                else
-                {
-                    // Recover with slight negative oscillation around -0.5..+0.5 m/s
-                    float r = (sim_t - 40.0f) / 4.0f;
-                    test_vs = 0.6f * sinf(r * 2.0f * (float)M_PI);
-                }
-
-                // Override reported vspeed so vario_get() reflects the test pattern.
-                s_vspeed = test_vs;
+                s_vspeed = vario_test_pattern(dt);
             }
             update_audio();
             prev_us = now_us;
