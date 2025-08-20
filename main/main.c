@@ -32,7 +32,7 @@ static void ble_timeout_cb(TimerHandle_t timer)
 {
     (void)timer;
     if (!bt_has_ever_connected()) {
-        ESP_LOGI(TAG, "No BLE connection after 30s -> disabling BLE stack (RTOS timer)");
+        ESP_LOGI(TAG, "No BLE connection -> disabling BLE stack (RTOS timer)");
         bt_deinit();
     } else {
         ESP_LOGI(TAG, "BLE connected before timeout; not disabling stack");
