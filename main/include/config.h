@@ -14,6 +14,10 @@ extern volatile bool conf_test_mode;
 
 bool config_apply_command(const char *cmd, char *out_resp, int resp_size);
 
+// Initialize configuration system (loads persisted values from NVS).
+void config_init(void);
+
+
 #ifdef __cplusplus
 }
 #endif

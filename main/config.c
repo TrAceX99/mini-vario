@@ -12,16 +12,47 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "battery.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 volatile bool conf_enable_uart = false;
 volatile bool conf_enable_audio = true;
 volatile bool conf_send_vario = true;
 volatile bool conf_test_mode = false;
 
+static nvs_handle_t s_nvs_handle = 0;
+static bool s_nvs_ready = false;
+
+void config_init(void)
+{
+    if (s_nvs_ready) return;
+    // Assume nvs_flash_init() already called elsewhere (e.g., BLE stack). Try open directly.
+    esp_err_t err = nvs_open("cfg", NVS_READWRITE, &s_nvs_handle);
+    if (err == ESP_ERR_NVS_NOT_INITIALIZED) {
+        // Fallback if init not done yet
+        if (nvs_flash_init() == ESP_OK) {
+            err = nvs_open("cfg", NVS_READWRITE, &s_nvs_handle);
+        }
+    }
+    if (err != ESP_OK) {
+        printf("CFG NVS open failed err=%d\n", (int)err);
+        return;
+    }
+    uint8_t v;
+    if (nvs_get_u8(s_nvs_handle, "uart", &v) == ESP_OK) conf_enable_uart = (v != 0);
+    if (nvs_get_u8(s_nvs_handle, "vario", &v) == ESP_OK) conf_send_vario = (v != 0);
+    s_nvs_ready = true;
+}
+
 bool config_set_uart(bool en)
 {
     bool prev = conf_enable_uart;
     conf_enable_uart = en;
+    if (prev != en && s_nvs_ready) {
+        if (nvs_set_u8(s_nvs_handle, "uart", conf_enable_uart ? 1 : 0) == ESP_OK) {
+            nvs_commit(s_nvs_handle);
+        }
+    }
     return prev;
 }
 
@@ -36,6 +67,11 @@ bool config_set_send_vario(bool en)
 {
     bool prev = conf_send_vario;
     conf_send_vario = en;
+    if (prev != en && s_nvs_ready) {
+        if (nvs_set_u8(s_nvs_handle, "vario", conf_send_vario ? 1 : 0) == ESP_OK) {
+            nvs_commit(s_nvs_handle);
+        }
+    }
     return prev;
 }
 

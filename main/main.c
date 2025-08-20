@@ -68,6 +68,7 @@ static void format_LK8EX1_string(char *buf, float pressure, float climb, float t
 void app_main(void)
 {
     bt_init();
+    config_init();
     baro_init();
     vario_init();
     battery_init();
