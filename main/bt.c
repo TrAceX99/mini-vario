@@ -305,7 +305,6 @@ int bt_deinit(void)
     }
     // Stop NimBLE host task
     nimble_port_stop();
-    nimble_port_freertos_deinit();
     nimble_port_deinit();
     ESP_LOGI(TAG, "BLE stack shutdown complete");
     return 0;
