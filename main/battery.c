@@ -2,12 +2,14 @@
 // Periodically samples battery voltage via ADC and provides filtered percentage.
 
 #include "battery.h"
+#include "config.h"
 
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_sleep.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -34,6 +36,7 @@ static TaskHandle_t s_task = NULL;
 static float s_voltage_v = 0.0f;  // filtered battery voltage
 static float s_percentage = 0.0f; // 0..1 filtered percentage
 static bool s_valid = false;
+static bool s_inact_forced = false; // whether inactivity timeout forced to 3s
 
 // ADC handles (oneshot + calibration)
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
@@ -141,25 +144,32 @@ static void battery_task(void *arg)
     }
     const TickType_t period = pdMS_TO_TICKS(BATTERY_SAMPLE_PERIOD_MS);
     TickType_t last = xTaskGetTickCount();
+    float v = read_voltage_multisample();
+    s_voltage_v = v;
+    s_percentage = map_voltage_to_percent(v);
+    s_valid = true;
     while (1)
     {
         vTaskDelayUntil(&last, period);
         // One multisampled reading (32 raw samples averaged inside helper)
-        float v = read_voltage_multisample();
-        if (v > 0.1f)
-        {
-            if (!s_valid)
-            {
-                s_voltage_v = v;
-                s_valid = true;
-            }
-            else
-            {
-                s_voltage_v += BATTERY_EXP_ALPHA * (v - s_voltage_v);
-            }
-            s_percentage = map_voltage_to_percent(s_voltage_v);
-        }
+        v = read_voltage_multisample();
+        s_voltage_v += BATTERY_EXP_ALPHA * (v - s_voltage_v);
+        s_percentage = map_voltage_to_percent(s_voltage_v);
         ESP_LOGD(TAG, "Vbatt=%.3fV pct=%.1f", s_voltage_v, s_percentage * 100.0f);
+
+        if (s_percentage <= 0.20f && !s_inact_forced)
+        {
+            conf_inact_timeout_s = 3; // permanently shorten until power cycle
+            s_inact_forced = true;
+            ESP_LOGW(TAG, "Battery low (%.1f%%) -> forcing inactivity timeout to 3s", s_percentage * 100.0f);
+        }
+        if (s_percentage <= 0.001f)
+        {
+            ESP_LOGE(TAG, "Battery depleted (%.3fV) -> entering deep sleep to prevent over-discharge", s_voltage_v);
+            conf_inact_timeout_s = 0;
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            esp_deep_sleep_start(); // no return
+        }
     }
 }
 
