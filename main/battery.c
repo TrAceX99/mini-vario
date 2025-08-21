@@ -157,7 +157,7 @@ static void battery_task(void *arg)
         s_percentage = map_voltage_to_percent(s_voltage_v);
         ESP_LOGD(TAG, "Vbatt=%.3fV pct=%.1f", s_voltage_v, s_percentage * 100.0f);
 
-        if (s_percentage <= 0.20f && !s_inact_forced)
+        if (s_percentage <= 0.10f && !s_inact_forced)
         {
             conf_inact_timeout_s = 3; // permanently shorten until power cycle
             s_inact_forced = true;
