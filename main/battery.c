@@ -3,6 +3,7 @@
 
 #include "battery.h"
 #include "config.h"
+#include "baro.h"
 
 #include <math.h>
 #include "freertos/FreeRTOS.h"
@@ -167,6 +168,7 @@ static void battery_task(void *arg)
         {
             ESP_LOGE(TAG, "Battery depleted (%.3fV) -> entering deep sleep to prevent over-discharge", s_voltage_v);
             conf_inact_timeout_s = 0;
+            baro_power_down();
             vTaskDelay(pdMS_TO_TICKS(3000));
             esp_deep_sleep_start(); // no return
         }

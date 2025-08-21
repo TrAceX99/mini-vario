@@ -18,6 +18,9 @@ void baro_init(void);
 // On failure, values are set to 0.
 void baro_read(float *pressure, float *temperature);
 
+// Put the BMP3 sensor into sleep (lowest power) mode. Safe to call multiple times.
+void baro_power_down(void);
+
 #ifdef __cplusplus
 }
 #endif

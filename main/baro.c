@@ -155,3 +155,15 @@ void baro_read(float *pressure, float *temperature)
     *temperature = (float)data.temperature / 100.0f; // convert 0.01C -> C
 #endif
 }
+
+void baro_power_down(void)
+{
+    struct bmp3_settings settings = {0};
+    settings.op_mode = BMP3_MODE_SLEEP;
+    int8_t res = bmp3_set_op_mode(&settings, &dev);
+    if (unlikely(res != BMP3_OK)) {
+        ESP_LOGW(TAG, "bmp3_set_op_mode(SLEEP) failed (%d)", res);
+    } else {
+        ESP_LOGI(TAG, "BMP3 put into sleep mode");
+    }
+}
