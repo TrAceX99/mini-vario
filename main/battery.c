@@ -160,9 +160,9 @@ static void battery_task(void *arg)
 
         if (s_percentage <= 0.10f && !s_inact_forced)
         {
-            conf_inact_timeout_s = 3; // permanently shorten until power cycle
+            conf_inact_timeout_s = 5; // permanently shorten until reboot
             s_inact_forced = true;
-            ESP_LOGW(TAG, "Battery low (%.1f%%) -> forcing inactivity timeout to 3s", s_percentage * 100.0f);
+            ESP_LOGW(TAG, "Battery low (%.1f%%) -> forcing inactivity timeout to 5s", s_percentage * 100.0f);
         }
         if (s_percentage <= 0.001f)
         {
