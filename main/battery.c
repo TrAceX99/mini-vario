@@ -169,8 +169,8 @@ static void battery_task(void *arg)
             ESP_LOGE(TAG, "Battery depleted (%.3fV) -> entering deep sleep to prevent over-discharge", s_voltage_v);
             conf_inact_timeout_s = 0;
             baro_power_down();
-            esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
             vTaskDelay(pdMS_TO_TICKS(3000));
+            esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
             esp_deep_sleep_start(); // no return
         }
     }
